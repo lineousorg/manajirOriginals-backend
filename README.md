@@ -1,20 +1,20 @@
-# Fashion CMS Backend
+﻿# Fashion CMS Backend
 
 A modern e-commerce Content Management System backend built with **NestJS** and **TypeScript**. This API provides comprehensive features for managing products, categories, variants, orders, and user authentication for a fashion retail platform.
 
-## ?? Features
+## Features
 
 - **User Management** - Role-based access control (Admin/User)
 - **Product Management** - Create, update, and manage fashion products with detailed descriptions
 - **Product Variants** - Support for multiple sizes, colors, and pricing per product
 - **Categories** - Organize products into categories
-- **Order Management** - Track orders with status workflow (Pending ? Confirmed ? Shipped ? Delivered)
+- **Order Management** - Track orders with status workflow (Pending > Confirmed > Shipped > Delivered)
 - **Authentication** - JWT-based authentication with Passport.js
 - **Database** - PostgreSQL with Prisma ORM for type-safe database access
 - **Validation** - Input validation with class-validator
 - **Testing** - Unit tests and E2E tests with Jest
 
-## ?? Tech Stack
+## Tech Stack
 
 - **Runtime**: Node.js
 - **Framework**: NestJS 11.x
@@ -26,7 +26,7 @@ A modern e-commerce Content Management System backend built with **NestJS** and 
 - **Testing**: Jest
 - **Code Quality**: ESLint & Prettier
 
-## ?? Prerequisites
+## Prerequisites
 
 Before you begin, ensure you have the following installed:
 
@@ -35,7 +35,7 @@ Before you begin, ensure you have the following installed:
 - **PostgreSQL** (v12 or higher)
 - **Git**
 
-## ??? Installation & Setup
+## Installation & Setup
 
 ### 1. Clone the Repository
 
@@ -84,7 +84,7 @@ npx prisma migrate dev
 npx prisma db seed
 \\\
 
-## ?? Running the Application
+## Running the Application
 
 ### Development Mode (with auto-reload)
 
@@ -107,7 +107,7 @@ npm run build
 npm run start:prod
 \\\
 
-## ?? Testing
+## Testing
 
 ### Unit Tests
 
@@ -133,7 +133,7 @@ npm run test:e2e
 npm run test:cov
 \\\
 
-## ?? Code Quality
+## Code Quality
 
 ### Run Linter
 
@@ -147,34 +147,34 @@ npm run lint
 npm run format
 \\\
 
-## ?? Project Structure
+## Project Structure
 
 \\\
 src/
-+-- auth/               # Authentication & Authorization
-�   +-- auth.controller.ts
-�   +-- auth.service.ts
-�   +-- jwt.strategy.ts
-�   +-- jwt-auth.guard.ts
-�   +-- roles.guard.ts
-+-- product/           # Product Management
-�   +-- product.controller.ts
-�   +-- product.service.ts
-�   +-- dto/
-+-- prisma/            # Database Service
-�   +-- prisma.service.ts
-+-- app.module.ts      # Root Module
-+-- app.controller.ts
-+-- app.service.ts
-+-- main.ts            # Application Entry Point
+├── auth/               # Authentication & Authorization
+│   ├── auth.controller.ts
+│   ├── auth.service.ts
+│   ├── jwt.strategy.ts
+│   ├── jwt-auth.guard.ts
+│   └── roles.guard.ts
+├── product/           # Product Management
+│   ├── product.controller.ts
+│   ├── product.service.ts
+│   └── dto/
+├── prisma/            # Database Service
+│   └── prisma.service.ts
+├── app.module.ts      # Root Module
+├── app.controller.ts
+├── app.service.ts
+└── main.ts            # Application Entry Point
 
 prisma/
-+-- schema.prisma      # Database Schema
-+-- seed.ts            # Database Seeding
-+-- migrations/        # Database Migrations
+├── schema.prisma      # Database Schema
+├── seed.ts            # Database Seeding
+└── migrations/        # Database Migrations
 \\\
 
-## ??? Database Schema
+## Database Schema
 
 ### User
 - \id\ (UUID): Unique identifier
@@ -219,7 +219,7 @@ ame\ (String): Product name
 ame\ (String): Category name
 - \isActive\ (Boolean): Category status
 
-## ?? Authentication
+## Authentication
 
 The API uses JWT (JSON Web Tokens) for authentication.
 
@@ -233,7 +233,7 @@ The API uses JWT (JSON Web Tokens) for authentication.
 
 Routes requiring authentication are protected by the \JwtAuthGuard\. Admin-only routes require the \ADMIN\ role.
 
-## ?? API Endpoints
+## API Endpoints
 
 ### Authentication
 - \POST /auth/login\ - User login
@@ -250,7 +250,7 @@ Routes requiring authentication are protected by the \JwtAuthGuard\. Admin-only 
 - \GET /orders\ - Get user orders
 - \POST /orders\ - Create order
 
-## ?? Troubleshooting
+## Troubleshooting
 
 ### Database Connection Error
 - Ensure PostgreSQL is running
@@ -267,13 +267,13 @@ npx prisma generate
 npx prisma migrate dev
 \\\
 
-## ?? Additional Resources
+## Additional Resources
 
 - [NestJS Documentation](https://docs.nestjs.com)
 - [Prisma Documentation](https://www.prisma.io/docs)
 - [JWT Authentication Guide](https://docs.nestjs.com/security/authentication)
 - [Role-Based Access Control](https://docs.nestjs.com/security/authorization)
 
-## ?? License
+## License
 
 This project is licensed under the UNLICENSED license.
