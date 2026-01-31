@@ -1,0 +1,44 @@
+
+DATABASE_URL="postgresql://postgres:dominic@localhost:5432/fashion_db_v2?schema=public"
+JWT_SECRET="XkZss308LyJqw3Y1rBQVqhq2YmJmNGgarHqboyJFJ/dK5yJx0A/ZCRkosU2V+cBka1hPPlH2hRdWIM7zQLKb+Q=="
+
+node version - 22.17.0
+prisma version - 6.19.2
+
+
+APIs:
+@POST <login> /auth/admin/login
+{
+  "email": "admin@system.com",
+  "password": "admin123"
+}
+
+Product:
+@POST <product> /products 
+post body-{
+  "name": "Polo T-Shirt",
+  "description": "Slim fit polo t-shirt",
+  "price": 320.99,
+  "categoryId": 1,
+  "isFeatured": true,
+  "variants": [
+    {
+      "size": "M",
+      "color": "Black",
+      "price": 320.99,
+      "stock": 40
+    },
+    {
+      "size": "L",
+      "color": "White",
+      "price": 320.99,
+      "stock": 25
+    }
+  ]
+}
+
+@GET <product> /products
+@GET <product> /products/:id
+@PATCH <product> /products/:id
+@DELETE <product> /products/:id
+
