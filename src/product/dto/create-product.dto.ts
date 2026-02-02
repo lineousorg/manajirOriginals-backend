@@ -1,13 +1,33 @@
-import { CreateVariantDto } from './product-variant.dto';
+import { VariantWithAttributesDto } from './create-product-with-attribute.dto';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsBoolean,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateProductDto {
+  @IsString()
   name!: string;
+
+  @IsString()
   description!: string;
-  price!: number;
+
+  @IsString()
+  slug!: string;
+
+  @IsNumber()
   categoryId!: number;
-  isFeatured?: boolean;
-  isBest?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
 
-  variants?: CreateVariantDto[];
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantWithAttributesDto)
+  variants?: VariantWithAttributesDto[];
 }

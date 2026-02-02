@@ -6,38 +6,72 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
 
 @Injectable()
 export class ProductService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
+
   async create(dto: CreateProductDto) {
-    return await this.prisma.product.create({
+    const product = await this.prisma.product.create({
       data: {
         name: dto.name,
         description: dto.description,
-        price: dto.price,
         categoryId: dto.categoryId,
-        isFeatured: dto.isFeatured ?? false,
-        isBest: dto.isBest ?? false,
         isActive: dto.isActive ?? true,
-
+        slug: dto.slug,
         variants: dto.variants
           ? {
-            create: dto.variants,
-          }
+              create: dto.variants.map((v: VariantWithAttributesDto) => ({
+                sku:
+                  v.sku ??
+                  `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                price: v.price,
+                stock: v.stock,
+                ...(v.attributes && {
+                  attributes: {
+                    create: v.attributes.map((a) => ({
+                      attributeValueId: a.valueId,
+                    })),
+                  },
+                }),
+              })),
+            }
           : undefined,
       },
       include: {
         category: true,
-        variants: true,
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attributeValue: {
+                  include: {
+                    attribute: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
+    return {
+      message: 'Product created successfully',
+      status: 'success',
+      data: product,
+    };
   }
 
   async findAll() {
-    return await this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       include: { category: true, variants: true },
     });
+    return {
+      message: products.length > 0 ? 'Products found' : 'No products found',
+      status: 'success',
+      data: products,
+    };
   }
 
   async findOne(id: number) {
@@ -46,7 +80,11 @@ export class ProductService {
       include: { category: true, variants: true },
     });
     if (!product) throw new NotFoundException('Product not found');
-    return product;
+    return {
+      message: 'Product found',
+      status: 'success',
+      data: product,
+    };
   }
 
   async update(id: number, dto: UpdateProductDto) {
@@ -58,6 +96,7 @@ export class ProductService {
       where: { id },
       data: {
         ...rest,
+        // Don't include price/isFeatured/isBest
 
         ...(categoryId && {
           category: {
@@ -68,7 +107,11 @@ export class ProductService {
         ...(variants && {
           variants: {
             deleteMany: {},
-            create: variants,
+            create: variants.map((v) => ({
+              sku: v.sku,
+              price: v.price,
+              stock: v.stock,
+            })),
           },
         }),
       },
@@ -78,16 +121,19 @@ export class ProductService {
       },
     });
 
-    // ✅ RETURN MESSAGE + DATA
     return {
       message: 'Product updated successfully',
       data: product,
     };
   }
 
-
   async remove(id: number) {
-    await this.findOne(id); // check if exists
-    return this.prisma.product.delete({ where: { id } });
+    await this.findOne(id);
+    await this.prisma.product.delete({ where: { id } });
+    return {
+      message: 'Product deleted successfully',
+      status: 'success',
+      data: null,
+    };
   }
 }

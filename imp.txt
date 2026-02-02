@@ -6,39 +6,77 @@ node version - 22.17.0
 prisma version - 6.19.2
 
 
-APIs:
-@POST <login> /auth/admin/login
+API Routes Documentation
+
+Auth Routes: 
+1. Admin Login
+Endpoint: POST /auth/admin/login
+Auth Required: No
+Request Body:
 {
-  "email": "admin@system.com",
-  "password": "admin123"
+  "email": "string",
+  "password": "string"
 }
 
-Product:
-@POST <product> /products 
-post body-{
-  "name": "Polo T-Shirt",
-  "description": "Slim fit polo t-shirt",
-  "price": 320.99,
-  "categoryId": 1,
-  "isFeatured": true,
+
+Product Routes: 
+2. Create Product (with optional attributes)
+Endpoint: POST /products
+Auth Required: Yes (ADMIN role)
+Request Body:
+{
+  "name": "string",
+  "description": "string",
+  "slug": "string",
+  "categoryId": "number",
+  "isActive?": "boolean",
   "variants": [
     {
-      "size": "M",
-      "color": "Black",
-      "price": 320.99,
-      "stock": 40
-    },
-    {
-      "size": "L",
-      "color": "White",
-      "price": 320.99,
-      "stock": 25
+      "sku?": "string (auto-generated if not provided)",
+      "price": "number",
+      "stock": "number",
+      "attributes?": [
+        {
+          "attributeId": "number",
+          "valueId": "number"
+        }
+      ]
     }
   ]
 }
 
-@GET <product> /products
-@GET <product> /products/:id
-@PATCH <product> /products/:id
-@DELETE <product> /products/:id
+3. Get All Products
+Endpoint: GET /products
+Auth Required: Yes
+Request Body: No body required
 
+4. Get Single Product
+Endpoint: GET /products/:id
+Auth Required: Yes
+Request Body: No body required
+Params: id (number)
+
+5. Update Product
+Endpoint: PATCH /products/:id
+Auth Required: Yes (ADMIN role)
+Request Body:
+{
+  "name?": "string",
+  "description?": "string",
+  "isActive?": "boolean",
+  "categoryId?": "number",
+  "variants?": [
+    {
+      "price": "number",
+      "stock": "number",
+      "sku": "string"
+    }
+  ]
+}
+Params: id (number)
+
+6. Delete Product
+Endpoint: DELETE /products/:id
+Auth Required: Yes (ADMIN role)
+Request Body: No body required
+Params: id (number)
