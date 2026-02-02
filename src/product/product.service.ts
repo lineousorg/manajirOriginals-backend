@@ -2,7 +2,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -13,6 +17,15 @@ export class ProductService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateProductDto) {
+    // Check if slug already exists
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { slug: dto.slug },
+    });
+
+    if (existingProduct) {
+      throw new ConflictException('Product with this slug already exists');
+    }
+
     const product = await this.prisma.product.create({
       data: {
         name: dto.name,

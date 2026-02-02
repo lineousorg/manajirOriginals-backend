@@ -80,3 +80,78 @@ Endpoint: DELETE /products/:id
 Auth Required: Yes (ADMIN role)
 Request Body: No body required
 Params: id (number)
+
+
+Create Category
+Endpoint: POST /categories
+Auth Required: Yes (ADMIN role)
+Request Body:
+{
+  "name": "Electronics",
+  "slug": "electronics",
+  "parentId?": 1
+}
+Response:
+{
+  "message": "Category created successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "name": "Electronics",
+    "slug": "electronics",
+    "parentId": null,
+    "parent": null,
+    "children": [],
+    "createdAt": "2026-02-02T...",
+    "updatedAt": "2026-02-02T..."
+  }
+}
+
+2. Get All Categories
+Endpoint: GET /categories
+Auth Required: Yes
+Response:
+{
+  "message": "Categories found",
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "name": "Electronics",
+      "slug": "electronics",
+      "parentId": null,
+      "parent": null,
+      "children": [],
+      "_count": { "products": 5 }
+    }
+  ]
+}
+
+3. Get Single Category
+Endpoint: GET /categories/:id
+Auth Required: Yes
+Response:
+{
+  "message": "Category found",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "name": "Electronics",
+    "slug": "electronics",
+    "parentId": null,
+    "parent": null,
+    "children": [],
+    "products": [],
+    "_count": { "products": 5 }
+  }
+}
+
+4. Delete Category
+Endpoint: DELETE /categories/:id
+Auth Required: Yes (ADMIN role)
+Response:
+{
+  "message": "Category deleted successfully",
+  "status": "success",
+  "data": null
+}
