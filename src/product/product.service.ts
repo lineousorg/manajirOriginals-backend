@@ -29,6 +29,16 @@ export class ProductService {
     const product = await this.prisma.product.create({
       data: {
         name: dto.name,
+        images: dto.images
+          ? {
+              create: dto.images.map((img, index) => ({
+                url: img.url,
+                altText: img.altText ?? null,
+                position: img.position ?? index,
+                type: 'PRODUCT',
+              })),
+            }
+          : undefined,
         description: dto.description,
         categoryId: dto.categoryId,
         isActive: dto.isActive ?? true,
@@ -78,7 +88,7 @@ export class ProductService {
 
   async findAll() {
     const products = await this.prisma.product.findMany({
-      include: { category: true, variants: true },
+      include: { category: true, variants: true, images: true },
     });
     return {
       message: products.length > 0 ? 'Products found' : 'No products found',
@@ -90,7 +100,7 @@ export class ProductService {
   async findOne(id: number) {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: { category: true, variants: true },
+      include: { category: true, variants: true, images: true },
     });
     if (!product) throw new NotFoundException('Product not found');
     return {
