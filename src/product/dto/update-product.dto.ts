@@ -19,6 +19,23 @@ export class UpdateProductVariantDto {
   sku!: string;
 }
 
+export class UpdateProductImageDto {
+  @IsOptional()
+  @IsNumber()
+  id?: number;
+
+  @IsString()
+  url!: string;
+
+  @IsOptional()
+  @IsString()
+  altText?: string;
+
+  @IsOptional()
+  @IsNumber()
+  position?: number;
+}
+
 export class UpdateProductDto {
   @IsOptional()
   @IsString()
@@ -41,4 +58,10 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateProductVariantDto)
   variants?: UpdateProductVariantDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateProductImageDto)
+  images?: UpdateProductImageDto[];
 }

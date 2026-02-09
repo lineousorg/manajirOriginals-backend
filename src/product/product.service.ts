@@ -113,35 +113,72 @@ export class ProductService {
   async update(id: number, dto: UpdateProductDto) {
     await this.findOne(id);
 
-    const { categoryId, variants, ...rest } = dto;
+    const { categoryId, variants, images, ...rest } = dto;
 
-    const product = await this.prisma.product.update({
-      where: { id },
-      data: {
-        ...rest,
-        // Don't include price/isFeatured/isBest
+    // Use transaction to handle foreign key constraints
+    const product = await this.prisma.$transaction(async (tx) => {
+      // Delete variant attributes first, then variants
+      if (variants) {
+        // Get existing variant IDs
+        const existingVariants = await tx.productVariant.findMany({
+          where: { productId: id },
+          select: { id: true },
+        });
 
-        ...(categoryId && {
-          category: {
-            connect: { id: categoryId },
-          },
-        }),
+        // Delete variant attributes for each variant
+        for (const variant of existingVariants) {
+          await tx.variantAttribute.deleteMany({
+            where: { variantId: variant.id },
+          });
+        }
 
-        ...(variants && {
-          variants: {
-            deleteMany: {},
-            create: variants.map((v) => ({
-              sku: v.sku,
-              price: v.price,
-              stock: v.stock,
-            })),
-          },
-        }),
-      },
-      include: {
-        category: true,
-        variants: true,
-      },
+        // Delete variants
+        await tx.productVariant.deleteMany({
+          where: { productId: id },
+        });
+      }
+
+      // Update product
+      return tx.product.update({
+        where: { id },
+        data: {
+          ...rest,
+          // Don't include price/isFeatured/isBest
+
+          ...(categoryId && {
+            category: {
+              connect: { id: categoryId },
+            },
+          }),
+
+          ...(variants && {
+            variants: {
+              create: variants.map((v) => ({
+                sku: v.sku,
+                price: v.price,
+                stock: v.stock,
+              })),
+            },
+          }),
+
+          ...(images && {
+            images: {
+              deleteMany: {},
+              create: images.map((img, index) => ({
+                url: img.url,
+                altText: img.altText ?? null,
+                position: img.position ?? index,
+                type: 'PRODUCT',
+              })),
+            },
+          }),
+        },
+        include: {
+          category: true,
+          variants: true,
+          images: true,
+        },
+      });
     });
 
     return {
