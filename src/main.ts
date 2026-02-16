@@ -8,7 +8,8 @@ dotenv.config();
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
+  // Add global /api prefix
+  app.setGlobalPrefix('api');
   // Increase body size limit for file uploads (default is 100kb)
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
