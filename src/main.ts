@@ -31,6 +31,7 @@ async function bootstrap() {
       'http://localhost:3000',
       'http://localhost:3001',
       'http://192.168.68.63:3000',
+      'https://dashboard.manajiroriginals.com'
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
