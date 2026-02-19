@@ -838,6 +838,33 @@ Authorization: Bearer <admin_token>
 
 ---
 
+### Download Order Receipt
+Download a PDF receipt for an order. Admins can download any order receipt, customers can download only their own.
+
+**Endpoint:** `GET /api/orders/:id/receipt`
+
+**Access:** Authenticated users (own orders) or Admin (any order)
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Success Response (200):**
+Returns a PDF file with the following headers:
+```
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="receipt-1.pdf"
+Content-Length: <file size in bytes>
+```
+
+**Error Responses:**
+- 401 Unauthorized - If not authenticated
+- 403 Forbidden - If trying to access another user's order
+- 404 Not Found - If order doesn't exist
+
+---
+
 ## Addresses
 
 All address endpoints require authentication.
