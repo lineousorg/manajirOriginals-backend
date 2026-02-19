@@ -13,97 +13,56 @@ import {
   CreateAttributeDto,
   UpdateAttributeDto,
 } from './dto/create-attribute.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
 
+@ApiTags('Attributes')
 @Controller('attributes')
 export class AttributeController {
   constructor(private readonly attributeService: AttributeService) {}
 
   /**
    * Create a new attribute
-   * POST /attributes
-   *
-   * Request Body:
-   * {
-   *   "name": "Color"  // Required - unique name for the attribute
-   * }
-   *
-   * Response:
-   * {
-   *   "message": "Attribute created successfully",
-   *   "status": "success",
-   *   "data": {
-   *     "id": 1,
-   *     "name": "Color"
-   *   }
-   * }
    */
   @Post()
+  @ApiOperation({ summary: 'Create a new attribute', description: 'Public endpoint' })
+  @ApiBody({ type: CreateAttributeDto })
+  @ApiResponse({ status: 201, description: 'Attribute created successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
   create(@Body() dto: CreateAttributeDto) {
     return this.attributeService.create(dto);
   }
 
   /**
    * Get all attributes
-   * GET /attributes
-   *
-   * Response:
-   * {
-   *   "message": "Attributes retrieved successfully",
-   *   "status": "success",
-   *   "data": [
-   *     { "id": 1, "name": "Color" },
-   *     { "id": 2, "name": "Size" }
-   *   ]
-   * }
    */
   @Get()
+  @ApiOperation({ summary: 'Get all attributes', description: 'Public endpoint' })
+  @ApiResponse({ status: 200, description: 'Returns all attributes' })
   findAll() {
     return this.attributeService.findAll();
   }
 
   /**
    * Get a single attribute by ID with its values
-   * GET /attributes/:id
-   *
-   * Response:
-   * {
-   *   "message": "Attribute retrieved successfully",
-   *   "status": "success",
-   *   "data": {
-   *     "id": 1,
-   *     "name": "Color",
-   *     "values": [
-   *       { "id": 1, "value": "Red", "attributeId": 1 },
-   *       { "id": 2, "value": "Blue", "attributeId": 1 }
-   *     ]
-   *   }
-   * }
    */
   @Get(':id')
+  @ApiOperation({ summary: 'Get an attribute by ID', description: 'Public endpoint' })
+  @ApiParam({ name: 'id', type: Number, description: 'Attribute ID' })
+  @ApiResponse({ status: 200, description: 'Returns the attribute with values' })
+  @ApiResponse({ status: 404, description: 'Attribute not found' })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.attributeService.findOne(id);
   }
 
   /**
    * Update an attribute
-   * PATCH /attributes/:id
-   *
-   * Request Body:
-   * {
-   *   "name": "New Color Name"  // Optional - new name for the attribute
-   * }
-   *
-   * Response:
-   * {
-   *   "message": "Attribute updated successfully",
-   *   "status": "success",
-   *   "data": {
-   *     "id": 1,
-   *     "name": "New Color Name"
-   *   }
-   * }
    */
   @Patch(':id')
+  @ApiOperation({ summary: 'Update an attribute', description: 'Public endpoint' })
+  @ApiParam({ name: 'id', type: Number, description: 'Attribute ID' })
+  @ApiBody({ type: UpdateAttributeDto })
+  @ApiResponse({ status: 200, description: 'Attribute updated successfully' })
+  @ApiResponse({ status: 404, description: 'Attribute not found' })
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAttributeDto,
@@ -113,18 +72,12 @@ export class AttributeController {
 
   /**
    * Delete an attribute
-   * DELETE /attributes/:id
-   *
-   * Note: This will also delete all associated attribute values
-   *
-   * Response:
-   * {
-   *   "message": "Attribute deleted successfully",
-   *   "status": "success",
-   *   "data": null
-   * }
    */
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete an attribute', description: 'Public endpoint - deletes associated values too' })
+  @ApiParam({ name: 'id', type: Number, description: 'Attribute ID' })
+  @ApiResponse({ status: 200, description: 'Attribute deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Attribute not found' })
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.attributeService.remove(id);
   }

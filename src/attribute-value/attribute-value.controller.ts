@@ -13,129 +13,67 @@ import {
   CreateAttributeValueDto,
   UpdateAttributeValueDto,
 } from './dto/create-attribute-value.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam } from '@nestjs/swagger';
 
+@ApiTags('Attribute Values')
 @Controller('attribute-values')
 export class AttributeValueController {
   constructor(private readonly attributeValueService: AttributeValueService) {}
 
   /**
    * Create a new attribute value
-   * POST /attribute-values
-   *
-   * Request Body:
-   * {
-   *   "value": "Red",        // Required - the value name (e.g., "Red", "Large", "Cotton")
-   *   "attributeId": 1       // Required - the ID of the parent attribute
-   * }
-   *
-   * Response:
-   * {
-   *   "message": "Attribute value created successfully",
-   *   "status": "success",
-   *   "data": {
-   *     "id": 1,
-   *     "value": "Red",
-   *     "attributeId": 1
-   *   }
-   * }
    */
   @Post()
+  @ApiOperation({ summary: 'Create a new attribute value', description: 'Public endpoint' })
+  @ApiBody({ type: CreateAttributeValueDto })
+  @ApiResponse({ status: 201, description: 'Attribute value created successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
   create(@Body() dto: CreateAttributeValueDto) {
     return this.attributeValueService.create(dto);
   }
 
   /**
    * Get all attribute values with their parent attribute info
-   * GET /attribute-values
-   *
-   * Response:
-   * {
-   *   "message": "Attribute values retrieved successfully",
-   *   "status": "success",
-   *   "data": [
-   *     {
-   *       "id": 1,
-   *       "value": "Red",
-   *       "attributeId": 1,
-   *       "attribute": { "id": 1, "name": "Color" }
-   *     },
-   *     {
-   *       "id": 2,
-   *       "value": "Blue",
-   *       "attributeId": 1,
-   *       "attribute": { "id": 1, "name": "Color" }
-   *     }
-   *   ]
-   * }
    */
   @Get()
+  @ApiOperation({ summary: 'Get all attribute values', description: 'Public endpoint' })
+  @ApiResponse({ status: 200, description: 'Returns all attribute values' })
   findAll() {
     return this.attributeValueService.findAll();
   }
 
   /**
    * Get all values for a specific attribute
-   * GET /attribute-values/attribute/:attributeId
-   *
-   * Example: GET /attribute-values/attribute/1
-   *
-   * Response:
-   * {
-   *   "message": "Attribute values retrieved successfully",
-   *   "status": "success",
-   *   "data": [
-   *     { "id": 1, "value": "Red", "attributeId": 1 },
-   *     { "id": 2, "value": "Blue", "attributeId": 1 }
-   *   ]
-   * }
    */
   @Get('attribute/:attributeId')
+  @ApiOperation({ summary: 'Get attribute values by attribute ID', description: 'Public endpoint' })
+  @ApiParam({ name: 'attributeId', type: Number, description: 'Attribute ID' })
+  @ApiResponse({ status: 200, description: 'Returns attribute values for the attribute' })
   findByAttribute(@Param('attributeId', ParseIntPipe) attributeId: number) {
     return this.attributeValueService.findByAttribute(attributeId);
   }
 
   /**
    * Get a single attribute value by ID
-   * GET /attribute-values/:id
-   *
-   * Response:
-   * {
-   *   "message": "Attribute value retrieved successfully",
-   *   "status": "success",
-   *   "data": {
-   *     "id": 1,
-   *     "value": "Red",
-   *     "attributeId": 1,
-   *     "attribute": { "id": 1, "name": "Color" }
-   *   }
-   * }
    */
   @Get(':id')
+  @ApiOperation({ summary: 'Get an attribute value by ID', description: 'Public endpoint' })
+  @ApiParam({ name: 'id', type: Number, description: 'Attribute Value ID' })
+  @ApiResponse({ status: 200, description: 'Returns the attribute value' })
+  @ApiResponse({ status: 404, description: 'Attribute value not found' })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.attributeValueService.findOne(id);
   }
 
   /**
    * Update an attribute value
-   * PATCH /attribute-values/:id
-   *
-   * Request Body:
-   * {
-   *   "value": "Navy Blue"  // Optional - new value name
-   * }
-   *
-   * Response:
-   * {
-   *   "message": "Attribute value updated successfully",
-   *   "status": "success",
-   *   "data": {
-   *     "id": 1,
-   *     "value": "Navy Blue",
-   *     "attributeId": 1
-   *   }
-   * }
    */
   @Patch(':id')
+  @ApiOperation({ summary: 'Update an attribute value', description: 'Public endpoint' })
+  @ApiParam({ name: 'id', type: Number, description: 'Attribute Value ID' })
+  @ApiBody({ type: UpdateAttributeValueDto })
+  @ApiResponse({ status: 200, description: 'Attribute value updated successfully' })
+  @ApiResponse({ status: 404, description: 'Attribute value not found' })
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAttributeValueDto,
@@ -145,18 +83,12 @@ export class AttributeValueController {
 
   /**
    * Delete an attribute value
-   * DELETE /attribute-values/:id
-   *
-   * Note: This will also remove the value from all variant attributes
-   *
-   * Response:
-   * {
-   *   "message": "Attribute value deleted successfully",
-   *   "status": "success",
-   *   "data": null
-   * }
    */
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete an attribute value', description: 'Public endpoint - removes from variant attributes too' })
+  @ApiParam({ name: 'id', type: Number, description: 'Attribute Value ID' })
+  @ApiResponse({ status: 200, description: 'Attribute value deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Attribute value not found' })
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.attributeValueService.remove(id);
   }
