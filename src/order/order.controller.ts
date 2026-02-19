@@ -8,7 +8,9 @@ import {
   ParseIntPipe,
   UseGuards,
   Request,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -76,5 +78,30 @@ export class OrderController {
     @Request() req: RequestWithUser,
   ) {
     return this.orderService.updateStatus(id, dto, req.user.id, req.user.role);
+  }
+
+  /**
+   * Download order receipt as PDF
+   * Access: Admins can download any order, customers can download only their own
+   */
+  @Get(':id/receipt')
+  async downloadReceipt(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: RequestWithUser,
+    @Res() res: Response,
+  ) {
+    const receiptBuffer = await this.orderService.generateReceipt(
+      id,
+      req.user.id,
+      req.user.role,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="receipt-${id}.pdf"`,
+      'Content-Length': receiptBuffer.length,
+    });
+
+    res.end(receiptBuffer);
   }
 }

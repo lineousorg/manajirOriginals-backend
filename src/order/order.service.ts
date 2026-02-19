@@ -1,3 +1,7 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   Injectable,
   NotFoundException,
@@ -8,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order, OrderStatus, Role } from '@prisma/client';
+import PDFDocument from 'pdfkit';
 
 @Injectable()
 export class OrderService {
@@ -311,5 +316,160 @@ export class OrderService {
       status: 'success',
       data: updatedOrder,
     };
+  }
+
+  /**
+   * Generate a PDF receipt for an order
+   * Security: Customers can only generate receipts for their own orders
+   */
+  async generateReceipt(
+    id: number,
+    userId: number,
+    userRole: Role,
+  ): Promise<Buffer> {
+    // Fetch order with all details
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: {
+        user: true,
+        items: {
+          include: {
+            variant: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Security: Check if user owns this order or is admin
+    if (userRole !== Role.ADMIN && order.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to view this order',
+      );
+    }
+
+    // Fetch user's default address for shipping info
+    const defaultAddress = await this.prisma.address.findFirst({
+      where: {
+        userId: order.userId,
+        isDefault: true,
+      },
+    });
+
+    // Generate PDF
+    const pdfBuffer: Buffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 50 });
+      const chunks: Buffer[] = [];
+
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      // Header
+      doc.fontSize(24).text('RECEIPT', { align: 'center' });
+      doc.moveDown();
+
+      // Company Info
+      doc.fontSize(12).text('Manajir Originals', { align: 'center' });
+      doc.text('E-commerce Store', { align: 'center' });
+      doc.moveDown();
+
+      // Order Details
+      doc.fontSize(12);
+      doc.text(`Order ID: #${order.id}`);
+      doc.text(`Date: ${order.createdAt.toLocaleDateString()}`);
+      doc.text(`Status: ${order.status}`);
+      doc.text(`Payment Method: ${order.paymentMethod || 'N/A'}`);
+      doc.moveDown();
+
+      // Customer Info
+      doc.fontSize(14).text('Customer Details', { underline: true });
+      doc.fontSize(12);
+      doc.text(`Email: ${order.user.email}`);
+      if (defaultAddress) {
+        doc.text(`Name: ${defaultAddress.firstName} ${defaultAddress.lastName}`);
+        doc.text(`Phone: ${defaultAddress.phone}`);
+      }
+      doc.moveDown();
+
+      // Shipping Address
+      if (defaultAddress) {
+        doc.fontSize(14).text('Shipping Address', { underline: true });
+        doc.fontSize(12);
+        doc.text(`${defaultAddress.address}`);
+        if (defaultAddress.city || defaultAddress.postalCode) {
+          doc.text(`${defaultAddress.city || ''} ${defaultAddress.postalCode || ''}`.trim());
+        }
+        if (defaultAddress.country) {
+          doc.text(`${defaultAddress.country}`);
+        }
+        doc.moveDown();
+      }
+
+      // Items Table Header
+      doc.fontSize(14).text('Order Items', { underline: true });
+      doc.moveDown(0.5);
+
+      const tableTop = doc.y;
+      doc.fontSize(10);
+      doc.text('Item', 50, tableTop);
+      doc.text('Qty', 200, tableTop);
+      doc.text('Price', 250, tableTop);
+      doc.text('Total', 320, tableTop);
+      
+      // Draw line under header
+      doc.moveTo(50, tableTop + 15)
+        .lineTo(400, tableTop + 15)
+        .stroke();
+
+      let position = tableTop + 25;
+
+      // Items
+      for (const item of order.items) {
+        const itemName = item.variant.product.name;
+        const variantName = item.variant.sku ? ` (SKU: ${item.variant.sku})` : '';
+        const itemTotal = Number(item.price) * item.quantity;
+
+        doc.text(`${itemName}${variantName}`, 50, position, { width: 140 });
+        doc.text(item.quantity.toString(), 200, position);
+        doc.text(`${Number(item.price).toFixed(2)}`, 250, position);
+        doc.text(`${itemTotal.toFixed(2)}`, 320, position);
+
+        position += 20;
+      }
+
+      // Draw line before total
+      doc.moveTo(50, position + 5)
+        .lineTo(400, position + 5)
+        .stroke();
+
+      position += 20;
+
+      // Total
+      doc.fontSize(12);
+      doc.text('Total:', 250, position);
+      doc.text(`${Number(order.total).toFixed(2)}`, 320, position, { bold: true });
+
+      // Footer
+      doc.fontSize(10);
+      doc.text('Thank you for your purchase!', 50, 700, { align: 'center' });
+
+      doc.end();
+    });
+
+    return pdfBuffer;
   }
 }
