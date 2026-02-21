@@ -14,6 +14,8 @@ All API endpoints are prefixed with `/api`.
 - [Categories](#categories)
 - [Orders](#orders)
 - [Addresses](#addresses)
+- [Attributes](#attributes)
+- [Attribute Values](#attribute-values)
 - [Error Handling](#error-handling)
 
 ---
@@ -836,6 +838,33 @@ Authorization: Bearer <admin_token>
 
 ---
 
+### Download Order Receipt
+Download a PDF receipt for an order. Admins can download any order receipt, customers can download only their own.
+
+**Endpoint:** `GET /api/orders/:id/receipt`
+
+**Access:** Authenticated users (own orders) or Admin (any order)
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Success Response (200):**
+Returns a PDF file with the following headers:
+```
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="receipt-1.pdf"
+Content-Length: <file size in bytes>
+```
+
+**Error Responses:**
+- 401 Unauthorized - If not authenticated
+- 403 Forbidden - If trying to access another user's order
+- 404 Not Found - If order doesn't exist
+
+---
+
 ## Addresses
 
 All address endpoints require authentication.
@@ -1041,6 +1070,324 @@ Authorization: Bearer <token>
   "userId": 1,
   "createdAt": "2026-02-17T06:00:00.000Z",
   "updatedAt": "2026-02-17T06:15:00.000Z"
+}
+```
+
+---
+
+## Attributes
+
+All attribute endpoints are public. Attributes define types of product characteristics (e.g., "Color", "Size", "Material").
+
+### Create Attribute
+Create a new attribute.
+
+**Endpoint:** `POST /api/attributes`
+
+**Access:** Public
+
+**Request Body:**
+```json
+{
+  "name": "Color"
+}
+```
+
+**Validation Rules:**
+- `name`: Required, must be unique
+
+**Success Response (201):**
+```json
+{
+  "message": "Attribute created successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "name": "Color"
+  }
+}
+```
+
+---
+
+### Get All Attributes
+Retrieve all attributes.
+
+**Endpoint:** `GET /api/attributes`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attributes retrieved successfully",
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "name": "Color"
+    },
+    {
+      "id": 2,
+      "name": "Size"
+    }
+  ]
+}
+```
+
+---
+
+### Get Attribute by ID
+Retrieve a specific attribute with its values.
+
+**Endpoint:** `GET /api/attributes/:id`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute retrieved successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "name": "Color",
+    "values": [
+      {
+        "id": 1,
+        "value": "Red",
+        "attributeId": 1
+      },
+      {
+        "id": 2,
+        "value": "Blue",
+        "attributeId": 1
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Update Attribute
+Update an existing attribute.
+
+**Endpoint:** `PATCH /api/attributes/:id`
+
+**Access:** Public
+
+**Request Body:**
+```json
+{
+  "name": "New Color Name"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute updated successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "name": "New Color Name"
+  }
+}
+```
+
+---
+
+### Delete Attribute
+Delete an attribute. This will also delete all associated attribute values.
+
+**Endpoint:** `DELETE /api/attributes/:id`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute deleted successfully",
+  "status": "success",
+  "data": null
+}
+```
+
+---
+
+## Attribute Values
+
+All attribute value endpoints are public. Attribute values represent possible options for an attribute (e.g., "Red", "Blue" for Color, or "Small", "Medium", "Large" for Size).
+
+### Create Attribute Value
+Create a new attribute value.
+
+**Endpoint:** `POST /api/attribute-values`
+
+**Access:** Public
+
+**Request Body:**
+```json
+{
+  "value": "Red",
+  "attributeId": 1
+}
+```
+
+**Validation Rules:**
+- `value`: Required
+- `attributeId`: Required, must be a valid attribute ID
+
+**Success Response (201):**
+```json
+{
+  "message": "Attribute value created successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "value": "Red",
+    "attributeId": 1
+  }
+}
+```
+
+---
+
+### Get All Attribute Values
+Retrieve all attribute values with their parent attribute info.
+
+**Endpoint:** `GET /api/attribute-values`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute values retrieved successfully",
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "value": "Red",
+      "attributeId": 1,
+      "attribute": {
+        "id": 1,
+        "name": "Color"
+      }
+    },
+    {
+      "id": 2,
+      "value": "Blue",
+      "attributeId": 1,
+      "attribute": {
+        "id": 1,
+        "name": "Color"
+      }
+    }
+  ]
+}
+```
+
+---
+
+### Get Attribute Values by Attribute
+Retrieve all values for a specific attribute.
+
+**Endpoint:** `GET /api/attribute-values/attribute/:attributeId`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute values retrieved successfully",
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "value": "Red",
+      "attributeId": 1
+    },
+    {
+      "id": 2,
+      "value": "Blue",
+      "attributeId": 1
+    }
+  ]
+}
+```
+
+---
+
+### Get Attribute Value by ID
+Retrieve a specific attribute value.
+
+**Endpoint:** `GET /api/attribute-values/:id`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute value retrieved successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "value": "Red",
+    "attributeId": 1,
+    "attribute": {
+      "id": 1,
+      "name": "Color"
+    }
+  }
+}
+```
+
+---
+
+### Update Attribute Value
+Update an existing attribute value.
+
+**Endpoint:** `PATCH /api/attribute-values/:id`
+
+**Access:** Public
+
+**Request Body:**
+```json
+{
+  "value": "Navy Blue"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute value updated successfully",
+  "status": "success",
+  "data": {
+    "id": 1,
+    "value": "Navy Blue",
+    "attributeId": 1
+  }
+}
+```
+
+---
+
+### Delete Attribute Value
+Delete an attribute value. This will also remove the value from all variant attributes.
+
+**Endpoint:** `DELETE /api/attribute-values/:id`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Attribute value deleted successfully",
+  "status": "success",
+  "data": null
 }
 ```
 
