@@ -88,7 +88,23 @@ export class ProductService {
 
   async findAll() {
     const products = await this.prisma.product.findMany({
-      include: { category: true, variants: true, images: true },
+      include: {
+        category: true,
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attributeValue: {
+                  include: {
+                    attribute: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        images: true,
+      },
     });
     return {
       message: products.length > 0 ? 'Products found' : 'No products found',
@@ -100,7 +116,23 @@ export class ProductService {
   async findOne(id: number) {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: { category: true, variants: true, images: true },
+      include: {
+        category: true,
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attributeValue: {
+                  include: {
+                    attribute: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        images: true,
+      },
     });
     if (!product) throw new NotFoundException('Product not found');
     return {
