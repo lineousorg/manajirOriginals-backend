@@ -152,7 +152,7 @@ export class OrderService {
         },
       });
     } else {
-      // Customers can only see their own orders
+      // Customers can only see their own orders (include items with attributes)
       orders = await this.prisma.order.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
@@ -161,6 +161,31 @@ export class OrderService {
             select: {
               id: true,
               email: true,
+            },
+          },
+          items: {
+            include: {
+              variant: {
+                include: {
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      slug: true,
+                    },
+                  },
+                  attributes: {
+                    include: {
+                      attributeValue: {
+                        include: {
+                          attribute: true,
+                        },
+                      },
+                    },
+                  },
+                  images: true,
+                },
+              },
             },
           },
         },
@@ -208,6 +233,16 @@ export class OrderService {
                     slug: true,
                   },
                 },
+                attributes: {
+                  include: {
+                    attributeValue: {
+                      include: {
+                        attribute: true,
+                      },
+                    },
+                  },
+                },
+                images: true,
               },
             },
           },
