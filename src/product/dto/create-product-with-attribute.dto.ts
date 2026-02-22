@@ -4,6 +4,7 @@ import {
   IsArray,
   ValidateNested,
   IsOptional,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -25,6 +26,10 @@ export class VariantWithAttributesDto {
 
   @IsNumber()
   stock!: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })

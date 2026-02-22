@@ -42,6 +42,7 @@ export class ProductService {
         description: dto.description,
         categoryId: dto.categoryId,
         isActive: dto.isActive ?? true,
+        isDeleted: false,
         slug: dto.slug,
         variants: dto.variants
           ? {
@@ -51,6 +52,8 @@ export class ProductService {
                   `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 price: v.price,
                 stock: v.stock,
+                isActive: v.isActive ?? true,
+                isDeleted: false,
                 ...(v.attributes && {
                   attributes: {
                     create: v.attributes.map((a) => ({
@@ -88,9 +91,15 @@ export class ProductService {
 
   async findAll() {
     const products = await this.prisma.product.findMany({
+      where: {
+        isDeleted: false,
+      },
       include: {
         category: true,
         variants: {
+          where: {
+            isDeleted: false,
+          },
           include: {
             attributes: {
               include: {
@@ -119,6 +128,9 @@ export class ProductService {
       include: {
         category: true,
         variants: {
+          where: {
+            isDeleted: false,
+          },
           include: {
             attributes: {
               include: {
@@ -220,10 +232,92 @@ export class ProductService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
-    await this.prisma.product.delete({ where: { id } });
+    // Soft delete the product
+    await this.prisma.product.update({
+      where: { id },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+    });
     return {
       message: 'Product deleted successfully',
+      status: 'success',
+      data: null,
+    };
+  }
+
+  // Toggle product active status
+  async toggleProductActive(id: number) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const updated = await this.prisma.product.update({
+      where: { id },
+      data: { isActive: !product.isActive },
+    });
+
+    return {
+      message: `Product ${updated.isActive ? 'activated' : 'deactivated'} successfully`,
+      status: 'success',
+      data: updated,
+    };
+  }
+
+  // Toggle variant active status
+  async toggleVariantActive(productId: number, variantId: number) {
+    // Verify product exists
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const variant = await this.prisma.productVariant.findUnique({
+      where: { id: variantId },
+    });
+    if (!variant || variant.productId !== productId) {
+      throw new NotFoundException('Variant not found');
+    }
+
+    const updated = await this.prisma.productVariant.update({
+      where: { id: variantId },
+      data: { isActive: !variant.isActive },
+    });
+
+    return {
+      message: `Variant ${updated.isActive ? 'activated' : 'deactivated'} successfully`,
+      status: 'success',
+      data: updated,
+    };
+  }
+
+  // Soft delete a variant
+  async removeVariant(productId: number, variantId: number) {
+    // Verify product exists
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const variant = await this.prisma.productVariant.findUnique({
+      where: { id: variantId },
+    });
+    if (!variant || variant.productId !== productId) {
+      throw new NotFoundException('Variant not found');
+    }
+
+    await this.prisma.productVariant.update({
+      where: { id: variantId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+    });
+
+    return {
+      message: 'Variant deleted successfully',
       status: 'success',
       data: null,
     };

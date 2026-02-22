@@ -113,12 +113,14 @@ model Category {
  */
 
 model Product {
-  id          Int     @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   name        String
-  slug        String  @unique
+  slug        String   @unique
   description String?
   brand       String?
-  isActive    Boolean @default(true)
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  deletedAt   DateTime?
 
   categoryId Int
   category   Category @relation(fields: [categoryId], references: [id])
@@ -126,8 +128,8 @@ model Product {
   variants ProductVariant[]
   images   Image[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 /**
@@ -137,10 +139,13 @@ model Product {
  */
 
 model ProductVariant {
-  id    Int     @id @default(autoincrement())
-  sku   String  @unique
-  price Decimal @db.Decimal(10, 2)
-  stock Int
+  id        Int      @id @default(autoincrement())
+  sku       String   @unique
+  price     Decimal  @db.Decimal(10, 2)
+  stock     Int
+  isActive  Boolean  @default(true)
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
 
   productId Int
   product   Product @relation(fields: [productId], references: [id])
@@ -149,8 +154,8 @@ model ProductVariant {
   images     Image[]
   orderItems OrderItem[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 /**

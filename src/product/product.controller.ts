@@ -53,4 +53,31 @@ export class ProductController {
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.productService.remove(id);
   }
+
+  @Patch(':id/toggle-active')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  toggleProductActive(@Param('id', ParseIntPipe) id: number) {
+    return this.productService.toggleProductActive(id);
+  }
+
+  @Patch(':id/variants/:variantId/toggle-active')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  toggleVariantActive(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('variantId', ParseIntPipe) variantId: number,
+  ) {
+    return this.productService.toggleVariantActive(id, variantId);
+  }
+
+  @Delete(':id/variants/:variantId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  removeVariant(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('variantId', ParseIntPipe) variantId: number,
+  ) {
+    return this.productService.removeVariant(id, variantId);
+  }
 }

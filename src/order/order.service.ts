@@ -223,6 +223,11 @@ export class OrderService {
           },
         },
         items: {
+          where: {
+            variant: {
+              isDeleted: false,
+            },
+          },
           include: {
             variant: {
               include: {
