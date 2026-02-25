@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider            = "prisma-client-js"
   previewFeatures     = ["clientExtensions"]
@@ -16,11 +10,131 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/**
- * ============================
- * ENUMS
- * ============================
- */
+model User {
+  email     String    @unique
+  password  String
+  role      Role      @default(CUSTOMER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  id        Int       @id @default(autoincrement())
+  addresses Address[]
+  orders    Order[]
+}
+
+model Address {
+  id         Int      @id @default(autoincrement())
+  firstName  String
+  lastName   String
+  phone      String
+  address    String
+  city       String?
+  postalCode String?
+  country    String?
+  isDefault  Boolean  @default(false)
+  userId     Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model Category {
+  id        Int        @id @default(autoincrement())
+  name      String
+  createdAt DateTime   @default(now())
+  parentId  Int?
+  slug      String     @unique
+  updatedAt DateTime   @updatedAt
+  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryHierarchy")
+  products  Product[]
+}
+
+model Product {
+  id          Int              @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean          @default(true)
+  categoryId  Int
+  brand       String?
+  createdAt   DateTime         @default(now())
+  slug        String           @unique
+  updatedAt   DateTime         @updatedAt
+  images      Image[]
+  category    Category         @relation(fields: [categoryId], references: [id])
+  variants    ProductVariant[]
+}
+
+model ProductVariant {
+  id         Int                @id @default(autoincrement())
+  sku        String             @unique
+  price      Decimal            @db.Decimal(10, 2)
+  stock      Int
+  productId  Int
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  images     Image[]
+  orderItems OrderItem[]
+  product    Product            @relation(fields: [productId], references: [id])
+  attributes VariantAttribute[]
+}
+
+model Attribute {
+  id     Int              @id @default(autoincrement())
+  name   String           @unique
+  values AttributeValue[]
+}
+
+model AttributeValue {
+  id          Int                @id @default(autoincrement())
+  value       String
+  attributeId Int
+  attribute   Attribute          @relation(fields: [attributeId], references: [id])
+  variants    VariantAttribute[]
+}
+
+model VariantAttribute {
+  variantId        Int
+  attributeValueId Int
+  attributeValue   AttributeValue @relation(fields: [attributeValueId], references: [id])
+  variant          ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@id([variantId, attributeValueId])
+}
+
+model Image {
+  id        Int             @id @default(autoincrement())
+  url       String
+  altText   String?
+  position  Int
+  type      ImageType
+  productId Int?
+  variantId Int?
+  createdAt DateTime        @default(now())
+  product   Product?        @relation(fields: [productId], references: [id])
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+}
+
+model Order {
+  id            Int           @id @default(autoincrement())
+  status        OrderStatus   @default(PENDING)
+  total         Decimal       @db.Decimal(10, 2)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  userId        Int
+  paymentMethod PaymentMethod @default(CASH_ON_DELIVERY)
+  user          User          @relation(fields: [userId], references: [id])
+  items         OrderItem[]
+}
+
+model OrderItem {
+  id        Int            @id @default(autoincrement())
+  orderId   Int
+  variantId Int
+  quantity  Int
+  price     Decimal        @db.Decimal(10, 2)
+  order     Order          @relation(fields: [orderId], references: [id])
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+}
 
 enum Role {
   ADMIN
@@ -45,208 +159,4 @@ enum PaymentMethod {
   ONLINE
   STRIPE
   SSLCOMMERZ
-}
-
-/**
- * ============================
- * USER
- * ============================
- */
-
-model User {
-  id       Int    @id @default(autoincrement())
-  email    String @unique
-  password String
-  role     Role   @default(CUSTOMER)
-
-  orders Order[]
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  addresses Address[]
-}
-
-model Address {
-  id         Int     @id @default(autoincrement())
-  firstName  String
-  lastName   String
-  phone      String
-  address    String
-  city       String?
-  postalCode String?
-  country    String?
-
-  isDefault Boolean @default(false)
-
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/**
- * ============================
- * CATEGORY (self-referencing)
- * ============================
- */
-
-model Category {
-  id   Int    @id @default(autoincrement())
-  name String
-  slug String @unique
-
-  parentId Int?
-  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children Category[] @relation("CategoryHierarchy")
-
-  products Product[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/**
- * ============================
- * PRODUCT
- * ============================
- */
-
-model Product {
-  id          Int      @id @default(autoincrement())
-  name        String
-  slug        String   @unique
-  description String?
-  brand       String?
-  isActive    Boolean  @default(true)
-  isDeleted   Boolean  @default(false)
-  deletedAt   DateTime?
-
-  categoryId Int
-  category   Category @relation(fields: [categoryId], references: [id])
-
-  variants ProductVariant[]
-  images   Image[]
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-}
-
-/**
- * ============================
- * PRODUCT VARIANT
- * ============================
- */
-
-model ProductVariant {
-  id        Int      @id @default(autoincrement())
-  sku       String   @unique
-  price     Decimal  @db.Decimal(10, 2)
-  stock     Int
-  isActive  Boolean  @default(true)
-  isDeleted Boolean  @default(false)
-  deletedAt DateTime?
-
-  productId Int
-  product   Product @relation(fields: [productId], references: [id])
-
-  attributes VariantAttribute[]
-  images     Image[]
-  orderItems OrderItem[]
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-}
-
-/**
- * ============================
- * ATTRIBUTES (size, color, etc.)
- * ============================
- */
-
-model Attribute {
-  id   Int    @id @default(autoincrement())
-  name String @unique
-
-  values AttributeValue[]
-}
-
-model AttributeValue {
-  id    Int    @id @default(autoincrement())
-  value String
-
-  attributeId Int
-  attribute   Attribute @relation(fields: [attributeId], references: [id])
-
-  variants VariantAttribute[]
-}
-
-/**
- * Join table
- */
-
-model VariantAttribute {
-  variantId        Int
-  attributeValueId Int
-
-  variant        ProductVariant @relation(fields: [variantId], references: [id])
-  attributeValue AttributeValue @relation(fields: [attributeValueId], references: [id])
-
-  @@id([variantId, attributeValueId])
-}
-
-/**
- * ============================
- * IMAGES (attachments)
- * ============================
- */
-
-model Image {
-  id       Int       @id @default(autoincrement())
-  url      String
-  altText  String?
-  position Int
-  type     ImageType
-
-  productId Int?
-  product   Product? @relation(fields: [productId], references: [id])
-
-  variantId Int?
-  variant   ProductVariant? @relation(fields: [variantId], references: [id])
-
-  createdAt DateTime @default(now())
-}
-
-/**
- * ============================
- * ORDERS
- * ============================
- */
-
-model Order {
-  id     Int  @id @default(autoincrement())
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
-  status        OrderStatus   @default(PENDING)
-  paymentMethod PaymentMethod @default(CASH_ON_DELIVERY)
-  total         Decimal       @db.Decimal(10, 2)
-
-  items OrderItem[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model OrderItem {
-  id Int @id @default(autoincrement())
-
-  orderId Int
-  order   Order @relation(fields: [orderId], references: [id])
-
-  variantId Int
-  variant   ProductVariant @relation(fields: [variantId], references: [id])
-
-  quantity Int
-  price    Decimal @db.Decimal(10, 2)
 }
