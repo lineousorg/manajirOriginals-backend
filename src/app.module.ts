@@ -10,9 +10,16 @@ import { UserModule } from './user/user.module';
 import { AddressModule } from './address/address.module';
 import { AttributeModule } from './attribute/attribute.module';
 import { AttributeValueModule } from './attribute-value/attribute-value.module';
-
+import { ConfigModule } from '@nestjs/config';
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [
+        `.env.${process.env.NODE_ENV}`, // primary: dev/prod
+        '.env',                         // fallback/default
+      ],
+    }),
     PrismaModule,
     AuthModule,
     ProductModule,

@@ -3,6 +3,7 @@ generator client {
   previewFeatures     = ["clientExtensions"]
   engineType          = "binary"
   generatorClientType = "esm"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -59,6 +60,8 @@ model Product {
   createdAt   DateTime         @default(now())
   slug        String           @unique
   updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+  isDeleted   Boolean          @default(false)
   images      Image[]
   category    Category         @relation(fields: [categoryId], references: [id])
   variants    ProductVariant[]
@@ -72,6 +75,9 @@ model ProductVariant {
   productId  Int
   createdAt  DateTime           @default(now())
   updatedAt  DateTime           @updatedAt
+  deletedAt  DateTime?
+  isActive   Boolean            @default(true)
+  isDeleted  Boolean            @default(false)
   images     Image[]
   orderItems OrderItem[]
   product    Product            @relation(fields: [productId], references: [id])
