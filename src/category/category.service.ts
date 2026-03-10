@@ -35,10 +35,21 @@ export class CategoryService {
         name: dto.name,
         slug: dto.slug,
         parentId: dto.parentId ?? null,
+        images: dto.images
+          ? {
+              create: dto.images.map((img, index) => ({
+                url: img.url,
+                altText: img.altText,
+                position: img.position ?? index,
+                type: 'CATEGORY' as const,
+              })),
+            }
+          : undefined,
       },
       include: {
         parent: true,
         children: true,
+        images: true,
       },
     });
 
@@ -54,6 +65,7 @@ export class CategoryService {
       include: {
         parent: true,
         children: true,
+        images: true,
         _count: {
           select: { products: true },
         },
@@ -75,6 +87,7 @@ export class CategoryService {
         parent: true,
         children: true,
         products: true,
+        images: true,
         _count: {
           select: { products: true },
         },

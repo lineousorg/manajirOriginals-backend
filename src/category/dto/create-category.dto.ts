@@ -1,4 +1,18 @@
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+class ImageDto {
+  @IsString()
+  url!: string;
+
+  @IsOptional()
+  @IsString()
+  altText?: string;
+
+  @IsOptional()
+  @IsNumber()
+  position?: number;
+}
 
 export class CreateCategoryDto {
   @IsString()
@@ -10,4 +24,10 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsNumber()
   parentId?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImageDto)
+  images?: ImageDto[];
 }
