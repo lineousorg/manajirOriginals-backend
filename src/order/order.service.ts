@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -440,7 +441,9 @@ export class OrderService {
       doc.fontSize(12);
       doc.text(`Email: ${order.user.email}`);
       if (defaultAddress) {
-        doc.text(`Name: ${defaultAddress.firstName} ${defaultAddress.lastName}`);
+        doc.text(
+          `Name: ${defaultAddress.firstName} ${defaultAddress.lastName}`,
+        );
         doc.text(`Phone: ${defaultAddress.phone}`);
       }
       doc.moveDown();
@@ -451,7 +454,9 @@ export class OrderService {
         doc.fontSize(12);
         doc.text(`${defaultAddress.address}`);
         if (defaultAddress.city || defaultAddress.postalCode) {
-          doc.text(`${defaultAddress.city || ''} ${defaultAddress.postalCode || ''}`.trim());
+          doc.text(
+            `${defaultAddress.city || ''} ${defaultAddress.postalCode || ''}`.trim(),
+          );
         }
         if (defaultAddress.country) {
           doc.text(`${defaultAddress.country}`);
@@ -469,9 +474,10 @@ export class OrderService {
       doc.text('Qty', 200, tableTop);
       doc.text('Price', 250, tableTop);
       doc.text('Total', 320, tableTop);
-      
+
       // Draw line under header
-      doc.moveTo(50, tableTop + 15)
+      doc
+        .moveTo(50, tableTop + 15)
         .lineTo(400, tableTop + 15)
         .stroke();
 
@@ -480,7 +486,9 @@ export class OrderService {
       // Items
       for (const item of order.items) {
         const itemName = item.variant.product.name;
-        const variantName = item.variant.sku ? ` (SKU: ${item.variant.sku})` : '';
+        const variantName = item.variant.sku
+          ? ` (SKU: ${item.variant.sku})`
+          : '';
         const itemTotal = Number(item.price) * item.quantity;
 
         doc.text(`${itemName}${variantName}`, 50, position, { width: 140 });
@@ -492,7 +500,8 @@ export class OrderService {
       }
 
       // Draw line before total
-      doc.moveTo(50, position + 5)
+      doc
+        .moveTo(50, position + 5)
         .lineTo(400, position + 5)
         .stroke();
 
@@ -501,7 +510,9 @@ export class OrderService {
       // Total
       doc.fontSize(12);
       doc.text('Total:', 250, position);
-      doc.text(`${Number(order.total).toFixed(2)}`, 320, position, { bold: true });
+      doc.text(`${Number(order.total).toFixed(2)}`, 320, position, {
+        bold: true,
+      });
 
       // Footer
       doc.fontSize(10);

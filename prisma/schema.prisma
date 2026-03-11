@@ -30,6 +30,7 @@ enum Role {
 enum ImageType {
   PRODUCT
   VARIANT
+  CATEGORY
 }
 
 enum OrderStatus {
@@ -101,6 +102,7 @@ model Category {
   children Category[] @relation("CategoryHierarchy")
 
   products Product[]
+  images   Image[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -213,6 +215,9 @@ model Image {
 
   variantId Int?
   variant   ProductVariant? @relation(fields: [variantId], references: [id])
+
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id])
 
   createdAt DateTime @default(now())
 }

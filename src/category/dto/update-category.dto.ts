@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   IsString,
   IsOptional,
@@ -8,9 +7,10 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class CreateCategoryImageDto {
+export class UpdateCategoryImageDto {
   @IsString()
-  url!: string;
+  @IsOptional()
+  url?: string;
 
   @IsOptional()
   @IsString()
@@ -21,12 +21,14 @@ export class CreateCategoryImageDto {
   position?: number;
 }
 
-export class CreateCategoryDto {
+export class UpdateCategoryDto {
   @IsString()
-  name!: string;
+  @IsOptional()
+  name?: string;
 
   @IsString()
-  slug!: string;
+  @IsOptional()
+  slug?: string;
 
   @IsOptional()
   @IsNumber()
@@ -35,6 +37,6 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateCategoryImageDto)
-  images?: CreateCategoryImageDto[];
+  @Type(() => UpdateCategoryImageDto)
+  images?: UpdateCategoryImageDto[];
 }
