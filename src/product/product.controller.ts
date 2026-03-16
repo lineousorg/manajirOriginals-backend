@@ -8,6 +8,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import { Role } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Controller('products')
 export class ProductController {
@@ -31,8 +33,8 @@ export class ProductController {
   }
 
   @Get()
-  findAll() {
-    return this.productService.findAll();
+  findAll(@Query() pagination: PaginationQueryDto) {
+    return this.productService.findAll(pagination);
   }
 
   @Get(':id')

@@ -5,6 +5,7 @@ import {
   Patch,
   Param,
   Body,
+  Query,
   ParseIntPipe,
   UseGuards,
   Request,
@@ -18,6 +19,7 @@ import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 /**
  * Request interface with user from JWT
@@ -49,8 +51,11 @@ export class OrderController {
    * Access: Admins see all orders, customers see only their own
    */
   @Get()
-  findAll(@Request() req: RequestWithUser) {
-    return this.orderService.findAll(req.user.id, req.user.role);
+  findAll(
+    @Request() req: RequestWithUser,
+    @Query() pagination: PaginationQueryDto,
+  ) {
+    return this.orderService.findAll(req.user.id, req.user.role, pagination);
   }
 
   /**

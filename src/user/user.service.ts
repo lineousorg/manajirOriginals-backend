@@ -9,6 +9,11 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role, User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+  createPaginatedResponse,
+} from '../common/dto/pagination.dto';
 
 @Injectable()
 export class UserService {
@@ -76,33 +81,38 @@ export class UserService {
   async findAll(
     requestingUserId: number,
     requestingUserRole: Role,
-  ): Promise<{
-    message: string;
-    status: string;
-    data: Omit<User, 'password'>[];
-  }> {
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedResponse<Omit<User, 'password'>>> {
     if (requestingUserRole !== Role.ADMIN) {
       throw new ForbiddenException('Only administrators can view all users');
     }
 
-    const users = await this.prisma.user.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+    const { page = 1, limit = 20 } = pagination;
+    const skip = (page - 1) * limit;
 
-    // Remove passwords from response
-    // Remove passwords from response
-    const usersWithoutPassword = users.map((u) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { password, ...rest } = u;
-      return rest;
-    });
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.user.count(),
+    ]);
 
-    return {
-      message:
-        users.length > 0 ? 'Users retrieved successfully' : 'No users found',
-      status: 'success',
-      data: usersWithoutPassword,
-    };
+    return createPaginatedResponse(
+      users,
+      total,
+      page,
+      limit,
+      users.length > 0 ? 'Users retrieved successfully' : 'No users found',
+    );
   }
 
   /**
@@ -116,7 +126,7 @@ export class UserService {
   ): Promise<{
     message: string;
     status: string;
-    data: Omit<User, 'password'>;
+    data: any;
   }> {
     // Users can only view their own profile unless they're admin
     if (requestingUserRole !== Role.ADMIN && requestingUserId !== id) {
@@ -125,7 +135,12 @@ export class UserService {
 
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
         orders: {
           select: {
             id: true,
@@ -141,15 +156,10 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
-    // Remove password from response
-    // Remove password from response
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password, ...userWithoutPassword } = user;
-
     return {
       message: 'User retrieved successfully',
       status: 'success',
-      data: userWithoutPassword,
+      data: user,
     };
   }
 

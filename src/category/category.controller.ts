@@ -7,6 +7,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { Role } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Controller('categories')
 export class CategoryController {
@@ -40,8 +42,8 @@ export class CategoryController {
   }
 
   @Get()
-  findAll() {
-    return this.categoryService.findAll();
+  findAll(@Query() pagination: PaginationQueryDto) {
+    return this.categoryService.findAll(pagination);
   }
 
   @Get(':id')

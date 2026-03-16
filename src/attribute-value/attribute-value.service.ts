@@ -9,6 +9,11 @@ import {
   UpdateAttributeValueDto,
 } from './dto/create-attribute-value.dto';
 import { AttributeValue } from '@prisma/client';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+  createPaginatedResponse,
+} from '../common/dto/pagination.dto';
 
 @Injectable()
 export class AttributeValueService {
@@ -63,26 +68,38 @@ export class AttributeValueService {
   /**
    * Get all attribute values
    */
-  async findAll(): Promise<{
-    message: string;
-    status: string;
-    data: AttributeValue[];
-  }> {
-    const attributeValues = await this.prisma.attributeValue.findMany({
-      include: {
-        attribute: true,
-      },
-      orderBy: { value: 'asc' },
-    });
+  async findAll(
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedResponse<AttributeValue>> {
+    const { page = 1, limit = 20 } = pagination;
+    const skip = (page - 1) * limit;
 
-    return {
-      message:
-        attributeValues.length > 0
-          ? 'Attribute values retrieved successfully'
-          : 'No attribute values found',
-      status: 'success',
-      data: attributeValues,
-    };
+    const [attributeValues, total] = await Promise.all([
+      this.prisma.attributeValue.findMany({
+        skip,
+        take: limit,
+        include: {
+          attribute: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: { value: 'asc' },
+      }),
+      this.prisma.attributeValue.count(),
+    ]);
+
+    return createPaginatedResponse(
+      attributeValues,
+      total,
+      page,
+      limit,
+      attributeValues.length > 0
+        ? 'Attribute values retrieved successfully'
+        : 'No attribute values found',
+    );
   }
 
   /**

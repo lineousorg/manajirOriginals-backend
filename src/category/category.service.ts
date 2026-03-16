@@ -9,6 +9,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+  createPaginatedResponse,
+} from '../common/dto/pagination.dto';
 
 @Injectable()
 export class CategoryService {
@@ -140,34 +145,105 @@ export class CategoryService {
     };
   }
 
-  async findAll() {
-    const categories = await this.prisma.category.findMany({
-      include: {
-        parent: true,
-        children: true,
-        images: true,
-        _count: {
-          select: { products: true },
-        },
-      },
-    });
+  async findAll(
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedResponse<any>> {
+    const { page = 1, limit = 20 } = pagination;
+    const skip = (page - 1) * limit;
 
-    return {
-      message:
-        categories.length > 0 ? 'Categories found' : 'No categories found',
-      status: 'success',
-      data: categories,
-    };
+    const [categories, total] = await Promise.all([
+      this.prisma.category.findMany({
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          parentId: true,
+          createdAt: true,
+          updatedAt: true,
+          parent: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          children: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          images: {
+            select: {
+              id: true,
+              url: true,
+              altText: true,
+              position: true,
+            },
+            orderBy: { position: 'asc' },
+          },
+          _count: {
+            select: { products: true },
+          },
+        },
+      }),
+      this.prisma.category.count(),
+    ]);
+
+    return createPaginatedResponse(
+      categories,
+      total,
+      page,
+      limit,
+      categories.length > 0 ? 'Categories found' : 'No categories found',
+    );
   }
 
   async findOne(id: number) {
     const category = await this.prisma.category.findUnique({
       where: { id },
-      include: {
-        parent: true,
-        children: true,
-        products: true,
-        images: true,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        parentId: true,
+        createdAt: true,
+        updatedAt: true,
+        parent: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        children: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        products: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            isActive: true,
+          },
+        },
+        images: {
+          select: {
+            id: true,
+            url: true,
+            altText: true,
+            position: true,
+          },
+          orderBy: { position: 'asc' },
+        },
         _count: {
           select: { products: true },
         },

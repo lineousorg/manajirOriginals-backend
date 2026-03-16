@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   ParseIntPipe,
   UseGuards,
   Request,
@@ -17,6 +18,7 @@ import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 /**
  * Request interface with user from JWT
@@ -52,8 +54,11 @@ export class UserController {
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  findAll(@Request() req: RequestWithUser) {
-    return this.userService.findAll(req.user.id, req.user.role);
+  findAll(
+    @Request() req: RequestWithUser,
+    @Query() pagination: PaginationQueryDto,
+  ) {
+    return this.userService.findAll(req.user.id, req.user.role, pagination);
   }
 
   /**

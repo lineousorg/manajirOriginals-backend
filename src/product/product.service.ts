@@ -11,6 +11,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+  createPaginatedResponse,
+} from '../common/dto/pagination.dto';
 
 @Injectable()
 export class ProductService {
@@ -89,61 +94,138 @@ export class ProductService {
     };
   }
 
-  async findAll() {
-    const products = await this.prisma.product.findMany({
-      where: {
-        isDeleted: false,
-      },
-      include: {
-        category: true,
-        variants: {
-          where: {
-            isDeleted: false,
+  async findAll(
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedResponse<any>> {
+    const { page = 1, limit = 20 } = pagination;
+    const skip = (page - 1) * limit;
+
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where: {
+          isDeleted: false,
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
           },
-          include: {
-            attributes: {
-              include: {
-                attributeValue: {
-                  include: {
-                    attribute: true,
-                  },
-                },
+          variants: {
+            where: { isDeleted: false },
+            select: {
+              id: true,
+              sku: true,
+              price: true,
+              stock: true,
+              isActive: true,
+              _count: {
+                select: { attributes: true },
               },
             },
           },
+          images: {
+            where: { type: 'PRODUCT' },
+            select: {
+              id: true,
+              url: true,
+              altText: true,
+              position: true,
+            },
+            orderBy: { position: 'asc' },
+          },
         },
-        images: true,
-      },
-    });
-    return {
-      message: products.length > 0 ? 'Products found' : 'No products found',
-      status: 'success',
-      data: products,
-    };
+      }),
+      this.prisma.product.count({
+        where: { isDeleted: false },
+      }),
+    ]);
+
+    return createPaginatedResponse(
+      products,
+      total,
+      page,
+      limit,
+      products.length > 0 ? 'Products found' : 'No products found',
+    );
   }
 
   async findOne(id: number) {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: {
-        category: true,
-        variants: {
-          where: {
-            isDeleted: false,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
           },
-          include: {
+        },
+        variants: {
+          where: { isDeleted: false },
+          select: {
+            id: true,
+            sku: true,
+            price: true,
+            stock: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
             attributes: {
-              include: {
+              select: {
                 attributeValue: {
-                  include: {
-                    attribute: true,
+                  select: {
+                    id: true,
+                    value: true,
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                      },
+                    },
                   },
                 },
               },
             },
+            images: {
+              select: {
+                id: true,
+                url: true,
+                altText: true,
+                position: true,
+              },
+              orderBy: { position: 'asc' },
+            },
           },
         },
-        images: true,
+        images: {
+          select: {
+            id: true,
+            url: true,
+            altText: true,
+            position: true,
+          },
+          orderBy: { position: 'asc' },
+        },
       },
     });
     if (!product) throw new NotFoundException('Product not found');
@@ -161,22 +243,23 @@ export class ProductService {
 
     // Use transaction to handle foreign key constraints
     const product = await this.prisma.$transaction(async (tx) => {
-      // Delete variant attributes first, then variants
+      // Delete variant attributes and variants in bulk if variants are being updated
       if (variants) {
-        // Get existing variant IDs
+        // Get all variant IDs for this product
         const existingVariants = await tx.productVariant.findMany({
           where: { productId: id },
           select: { id: true },
         });
 
-        // Delete variant attributes for each variant
-        for (const variant of existingVariants) {
+        // Delete all variant attributes for all variants at once
+        if (existingVariants.length > 0) {
+          const variantIds = existingVariants.map((v) => v.id);
           await tx.variantAttribute.deleteMany({
-            where: { variantId: variant.id },
+            where: { variantId: { in: variantIds } },
           });
         }
 
-        // Delete variants
+        // Delete all variants at once
         await tx.productVariant.deleteMany({
           where: { productId: id },
         });
@@ -187,8 +270,6 @@ export class ProductService {
         where: { id },
         data: {
           ...rest,
-          // Don't include price/isFeatured/isBest
-
           ...(categoryId && {
             category: {
               connect: { id: categoryId },
@@ -217,10 +298,38 @@ export class ProductService {
             },
           }),
         },
-        include: {
-          category: true,
-          variants: true,
-          images: true,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          variants: {
+            select: {
+              id: true,
+              sku: true,
+              price: true,
+              stock: true,
+              isActive: true,
+            },
+          },
+          images: {
+            select: {
+              id: true,
+              url: true,
+              altText: true,
+              position: true,
+            },
+          },
         },
       });
     });

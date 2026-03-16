@@ -14,6 +14,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order, OrderStatus, Role } from '@prisma/client';
 import PDFDocument from 'pdfkit';
+import { PaginationQueryDto, PaginatedResponse, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class OrderService {
@@ -70,17 +71,21 @@ export class OrderService {
 
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
-      // Deduct stock for each item
-      for (const item of dto.items) {
-        await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: {
-            stock: {
-              decrement: item.quantity,
-            },
-          },
-        });
-      }
+      // Bulk update stock for all items at once
+      const stockUpdates = dto.items.map((item) => ({
+        id: item.variantId,
+        decrement: item.quantity,
+      }));
+
+      // Execute all stock updates in parallel
+      await Promise.all(
+        stockUpdates.map((update) =>
+          tx.productVariant.update({
+            where: { id: update.id },
+            data: { stock: { decrement: update.decrement } },
+          }),
+        ),
+      );
 
       // Create the order
       return tx.order.create({
@@ -92,11 +97,29 @@ export class OrderService {
             create: orderItemsData,
           },
         },
-        include: {
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          paymentMethod: true,
+          total: true,
+          createdAt: true,
+          updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+            },
+          },
           items: {
-            include: {
+            select: {
+              id: true,
+              quantity: true,
+              price: true,
               variant: {
-                include: {
+                select: {
+                  id: true,
+                  sku: true,
                   product: {
                     select: {
                       id: true,
@@ -106,12 +129,6 @@ export class OrderService {
                   },
                 },
               },
-            },
-          },
-          user: {
-            select: {
-              id: true,
-              email: true,
             },
           },
         },
@@ -132,73 +149,100 @@ export class OrderService {
   async findAll(
     userId: number,
     userRole: Role,
-  ): Promise<{
-    message: string;
-    status: string;
-    data: Order[];
-  }> {
-    let orders: Order[];
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedResponse<any>> {
+    const { page = 1, limit = 20 } = pagination;
+    const skip = (page - 1) * limit;
 
     if (userRole === Role.ADMIN) {
-      // Admin can see all orders
-      orders = await this.prisma.order.findMany({
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
+      // Admin can see all orders - with pagination
+      const [orders, total] = await Promise.all([
+        this.prisma.order.findMany({
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            paymentMethod: true,
+            total: true,
+            createdAt: true,
+            updatedAt: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+            _count: {
+              select: { items: true },
             },
           },
-        },
-      });
+        }),
+        this.prisma.order.count(),
+      ]);
+
+      return createPaginatedResponse(
+        orders,
+        total,
+        page,
+        limit,
+        orders.length > 0 ? 'Orders retrieved successfully' : 'No orders found',
+      );
     } else {
-      // Customers can only see their own orders (include items with attributes)
-      orders = await this.prisma.order.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
+      // Customers can only see their own orders - with pagination
+      const [orders, total] = await Promise.all([
+        this.prisma.order.findMany({
+          where: { userId },
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            paymentMethod: true,
+            total: true,
+            createdAt: true,
+            updatedAt: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+              },
             },
-          },
-          items: {
-            include: {
-              variant: {
-                include: {
-                  product: {
-                    select: {
-                      id: true,
-                      name: true,
-                      slug: true,
-                    },
-                  },
-                  attributes: {
-                    include: {
-                      attributeValue: {
-                        include: {
-                          attribute: true,
-                        },
+            items: {
+              select: {
+                id: true,
+                quantity: true,
+                price: true,
+                variant: {
+                  select: {
+                    id: true,
+                    sku: true,
+                    product: {
+                      select: {
+                        id: true,
+                        name: true,
+                        slug: true,
                       },
                     },
                   },
-                  images: true,
                 },
               },
             },
           },
-        },
-      });
-    }
+        }),
+        this.prisma.order.count({ where: { userId } }),
+      ]);
 
-    return {
-      message:
+      return createPaginatedResponse(
+        orders,
+        total,
+        page,
+        limit,
         orders.length > 0 ? 'Orders retrieved successfully' : 'No orders found',
-      status: 'success',
-      data: orders,
-    };
+      );
+    }
   }
 
   /**
@@ -212,11 +256,18 @@ export class OrderService {
   ): Promise<{
     message: string;
     status: string;
-    data: Order;
+    data: any;
   }> {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        paymentMethod: true,
+        total: true,
+        createdAt: true,
+        updatedAt: true,
         user: {
           select: {
             id: true,
@@ -229,9 +280,15 @@ export class OrderService {
               isDeleted: false,
             },
           },
-          include: {
+          select: {
+            id: true,
+            quantity: true,
+            price: true,
             variant: {
-              include: {
+              select: {
+                id: true,
+                sku: true,
+                price: true,
                 product: {
                   select: {
                     id: true,
@@ -240,15 +297,29 @@ export class OrderService {
                   },
                 },
                 attributes: {
-                  include: {
+                  select: {
                     attributeValue: {
-                      include: {
-                        attribute: true,
+                      select: {
+                        id: true,
+                        value: true,
+                        attribute: {
+                          select: {
+                            id: true,
+                            name: true,
+                          },
+                        },
                       },
                     },
                   },
                 },
-                images: true,
+                images: {
+                  select: {
+                    id: true,
+                    url: true,
+                    altText: true,
+                    position: true,
+                  },
+                },
               },
             },
           },
@@ -332,23 +403,23 @@ export class OrderService {
       },
     });
 
-    // If order is cancelled, restore stock
+    // If order is cancelled, restore stock using bulk update
     if (dto.status === OrderStatus.CANCELLED) {
       await this.prisma.$transaction(async (tx) => {
         const orderItems = await tx.orderItem.findMany({
           where: { orderId: id },
+          select: { variantId: true, quantity: true },
         });
 
-        for (const item of orderItems) {
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: {
-              stock: {
-                increment: item.quantity,
-              },
-            },
-          });
-        }
+        // Bulk restore stock for all items
+        await Promise.all(
+          orderItems.map((item) =>
+            tx.productVariant.update({
+              where: { id: item.variantId },
+              data: { stock: { increment: item.quantity } },
+            }),
+          ),
+        );
       });
     }
 
