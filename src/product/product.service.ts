@@ -100,6 +100,7 @@ export class ProductService {
     const { page = 1, limit = 20 } = pagination;
     const skip = (page - 1) * limit;
 
+    // Fetch products with minimal data - variants just for price/stock calculation
     const [products, total] = await Promise.all([
       this.prisma.product.findMany({
         where: {
@@ -112,39 +113,29 @@ export class ProductService {
           id: true,
           name: true,
           slug: true,
-          description: true,
           isActive: true,
           createdAt: true,
-          updatedAt: true,
           category: {
             select: {
               id: true,
               name: true,
-              slug: true,
             },
           },
           variants: {
             where: { isDeleted: false },
             select: {
-              id: true,
-              sku: true,
               price: true,
               stock: true,
-              isActive: true,
-              _count: {
-                select: { attributes: true },
-              },
             },
           },
           images: {
             where: { type: 'PRODUCT' },
             select: {
-              id: true,
               url: true,
-              altText: true,
               position: true,
             },
             orderBy: { position: 'asc' },
+            take: 1, // Only get first image as thumbnail
           },
         },
       }),
@@ -153,12 +144,32 @@ export class ProductService {
       }),
     ]);
 
+    // Transform data to lightweight format
+    const lightweightProducts = products.map((product) => {
+      const prices = product.variants.map((v) => Number(v.price));
+      const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
+
+      return {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        isActive: product.isActive,
+        createdAt: product.createdAt,
+        category: product.category,
+        thumbnail: product.images[0]?.url || null,
+        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+        totalStock,
+        hasVariants: product.variants.length > 0,
+      };
+    });
+
     return createPaginatedResponse(
-      products,
+      lightweightProducts,
       total,
       page,
       limit,
-      products.length > 0 ? 'Products found' : 'No products found',
+      lightweightProducts.length > 0 ? 'Products found' : 'No products found',
     );
   }
 
