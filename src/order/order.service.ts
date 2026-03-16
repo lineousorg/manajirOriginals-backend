@@ -12,9 +12,13 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import { Order, OrderStatus, Role } from '@prisma/client';
+import { Order, OrderStatus, Role, DeliveryType } from '@prisma/client';
 import PDFDocument from 'pdfkit';
-import { PaginationQueryDto, PaginatedResponse, createPaginatedResponse } from '../common/dto/pagination.dto';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+  createPaginatedResponse,
+} from '../common/dto/pagination.dto';
 
 @Injectable()
 export class OrderService {
@@ -69,6 +73,14 @@ export class OrderService {
       };
     });
 
+    // Calculate delivery charge based on delivery type
+    const deliveryType = dto.deliveryType || DeliveryType.INSIDE_DHAKA;
+    const deliveryCharge =
+      deliveryType === DeliveryType.INSIDE_DHAKA ? 70 : 150;
+
+    // Add delivery charge to total
+    total += deliveryCharge;
+
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
       // Bulk update stock for all items at once
@@ -93,6 +105,9 @@ export class OrderService {
           userId,
           paymentMethod: dto.paymentMethod || 'CASH_ON_DELIVERY',
           total,
+          addressId: dto.addressId || null,
+          deliveryType,
+          deliveryCharge,
           items: {
             create: orderItemsData,
           },
@@ -100,9 +115,12 @@ export class OrderService {
         select: {
           id: true,
           userId: true,
+          addressId: true,
           status: true,
           paymentMethod: true,
           total: true,
+          deliveryType: true,
+          deliveryCharge: true,
           createdAt: true,
           updatedAt: true,
           user: {
@@ -163,9 +181,12 @@ export class OrderService {
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
+            addressId: true,
             status: true,
             paymentMethod: true,
             total: true,
+            deliveryType: true,
+            deliveryCharge: true,
             createdAt: true,
             updatedAt: true,
             user: {
@@ -199,9 +220,12 @@ export class OrderService {
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
+            addressId: true,
             status: true,
             paymentMethod: true,
             total: true,
+            deliveryType: true,
+            deliveryCharge: true,
             createdAt: true,
             updatedAt: true,
             user: {
@@ -263,9 +287,12 @@ export class OrderService {
       select: {
         id: true,
         userId: true,
+        addressId: true,
         status: true,
         paymentMethod: true,
         total: true,
+        deliveryType: true,
+        deliveryCharge: true,
         createdAt: true,
         updatedAt: true,
         user: {
@@ -439,11 +466,12 @@ export class OrderService {
     userId: number,
     userRole: Role,
   ): Promise<Buffer> {
-    // Fetch order with all details
+    // Fetch order with all details including address
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: {
         user: true,
+        address: true,
         items: {
           include: {
             variant: {
@@ -453,6 +481,15 @@ export class OrderService {
                     id: true,
                     name: true,
                     slug: true,
+                  },
+                },
+                attributes: {
+                  include: {
+                    attributeValue: {
+                      include: {
+                        attribute: true,
+                      },
+                    },
                   },
                 },
               },
@@ -473,121 +510,262 @@ export class OrderService {
       );
     }
 
-    // Fetch user's default address for shipping info
-    const defaultAddress = await this.prisma.address.findFirst({
-      where: {
-        userId: order.userId,
-        isDefault: true,
-      },
-    });
-
     // Generate PDF
     const pdfBuffer: Buffer = await new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 50 });
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
       const chunks: Buffer[] = [];
 
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      // Header
-      doc.fontSize(24).text('RECEIPT', { align: 'center' });
-      doc.moveDown();
+      // Colors
+      const primaryColor = '#1a365d';
+      const secondaryColor = '#4a5568';
 
-      // Company Info
-      doc.fontSize(12).text('Manajir Originals', { align: 'center' });
-      doc.text('E-commerce Store', { align: 'center' });
-      doc.moveDown();
+      // Header Background
+      doc.rect(0, 0, 595, 120).fill(primaryColor);
 
-      // Order Details
-      doc.fontSize(12);
-      doc.text(`Order ID: #${order.id}`);
-      doc.text(`Date: ${order.createdAt.toLocaleDateString()}`);
-      doc.text(`Status: ${order.status}`);
-      doc.text(`Payment Method: ${order.paymentMethod || 'N/A'}`);
-      doc.moveDown();
+      // Company Name
+      doc.fillColor('#ffffff').fontSize(28).font('Helvetica-Bold');
+      doc.text('MANAJIR ORIGINALS', 50, 40, { align: 'center' });
+      doc.fontSize(12).font('Helvetica');
+      doc.text('www.manajiroriginals.com', 50, 85, { align: 'center' });
 
-      // Customer Info
-      doc.fontSize(14).text('Customer Details', { underline: true });
-      doc.fontSize(12);
-      doc.text(`Email: ${order.user.email}`);
-      if (defaultAddress) {
-        doc.text(
-          `Name: ${defaultAddress.firstName} ${defaultAddress.lastName}`,
-        );
-        doc.text(`Phone: ${defaultAddress.phone}`);
-      }
-      doc.moveDown();
+      // Receipt Title
+      doc.fontSize(14).font('Helvetica-Bold');
+      doc.text('RECEIPT', 50, 105, { align: 'center' });
+
+      // Reset position for content
+      doc.fillColor('#000000');
+      let yPos = 140;
+
+      // Order Information Card
+      doc.rect(40, yPos, 515, 80).fillAndStroke('#f7fafc', '#e2e8f0');
+      yPos += 15;
+
+      doc.fontSize(11).font('Helvetica-Bold');
+      doc.fillColor(primaryColor).text('ORDER INFORMATION', 55, yPos);
+      yPos += 20;
+
+      doc.fontSize(10).font('Helvetica');
+      doc.fillColor(secondaryColor);
+
+      // First column
+      doc.text(`Receipt No:`, 55, yPos);
+      doc.text(`Order ID:`, 55, yPos + 15);
+      doc.text(`Order Date:`, 55, yPos + 30);
+      doc.text(`Order Status:`, 55, yPos + 45);
+
+      // Second column
+      doc.text(`Payment Method:`, 250, yPos);
+      // doc.text(`Payment Status:`, 250, yPos + 15);
+      doc.text(`Delivery Type:`, 250, yPos + 30);
+
+      // Values (in black)
+      doc.fillColor('#000000');
+      doc.text(`REC-${order.id.toString().padStart(6, '0')}`, 130, yPos);
+      doc.text(`#${order.id}`, 130, yPos + 15);
+      doc.text(
+        order.createdAt.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        }),
+        130,
+        yPos + 30,
+      );
+      doc.fillColor('#38a169').text(order.status, 130, yPos + 45);
+
+      doc.text(order.paymentMethod.replace(/_/g, ' '), 340, yPos);
+      
+      // Payment status based on order status
+      const paymentStatus = order.status === 'PAID' || order.status === 'DELIVERED' ? 'PAID' : 'PENDING';
+      doc.fillColor(paymentStatus === 'PAID' ? '#38a169' : '#e53e3e').text(paymentStatus, 340, yPos + 15);
+
+      // Delivery type display
+      const deliveryTypeText = order.deliveryType
+        ? order.deliveryType === 'INSIDE_DHAKA'
+          ? 'Inside Dhaka'
+          : 'Outside Dhaka'
+        : 'Inside Dhaka';
+      doc.fillColor(primaryColor).text(deliveryTypeText, 340, yPos + 30);
+
+      yPos += 100;
+
+      // Customer & Shipping Section
+      const sectionWidth = 240;
+
+      // Customer Details
+      doc.rect(40, yPos, sectionWidth, 100).fillAndStroke('#f7fafc', '#e2e8f0');
+      doc.fillColor(primaryColor).fontSize(11).font('Helvetica-Bold');
+      doc.text('CUSTOMER DETAILS', 50, yPos + 10);
+
+      doc.fontSize(10).font('Helvetica');
+      doc.fillColor(secondaryColor);
+      doc.text(`Email:`, 50, yPos + 28);
+      doc.text(`Customer ID:`, 50, yPos + 43);
+
+      doc.fillColor('#000000');
+      doc.text(order.user.email, 110, yPos + 28);
+      doc.text(`#${order.user.id}`, 120, yPos + 43);
 
       // Shipping Address
-      if (defaultAddress) {
-        doc.fontSize(14).text('Shipping Address', { underline: true });
-        doc.fontSize(12);
-        doc.text(`${defaultAddress.address}`);
-        if (defaultAddress.city || defaultAddress.postalCode) {
-          doc.text(
-            `${defaultAddress.city || ''} ${defaultAddress.postalCode || ''}`.trim(),
-          );
+      const addressBoxX = 305;
+      doc
+        .rect(addressBoxX, yPos, sectionWidth, 100)
+        .fillAndStroke('#f7fafc', '#e2e8f0');
+      doc.fillColor(primaryColor).fontSize(11).font('Helvetica-Bold');
+      doc.text('SHIPPING ADDRESS', addressBoxX + 10, yPos + 10);
+
+      doc.fontSize(10).font('Helvetica');
+      doc.fillColor(secondaryColor);
+
+      if (order.address) {
+        doc.fillColor('#000000').fontSize(10);
+        doc.text(
+          order.address.firstName + ' ' + order.address.lastName,
+          addressBoxX + 10,
+          yPos + 28,
+        );
+        doc.fillColor(secondaryColor);
+        doc.text(`Phone:`, addressBoxX + 10, yPos + 43);
+        doc.text(`Address:`, addressBoxX + 10, yPos + 58);
+
+        doc.fillColor('#000000');
+        doc.text(order.address.phone, addressBoxX + 55, yPos + 43);
+        doc.text(order.address.address, addressBoxX + 10, yPos + 72, {
+          width: 210,
+        });
+
+        const cityLine = [
+          order.address.city,
+          order.address.postalCode,
+          order.address.country,
+        ]
+          .filter(Boolean)
+          .filter(c => c && c.toLowerCase() !== 'usa' && c.toLowerCase() !== 'united states')
+          .join(', ');
+        if (cityLine) {
+          doc.text(cityLine, addressBoxX + 10, yPos + 90);
         }
-        if (defaultAddress.country) {
-          doc.text(`${defaultAddress.country}`);
-        }
-        doc.moveDown();
+      } else {
+        doc.fillColor('#000000');
+        doc.text('No shipping address provided', addressBoxX + 10, yPos + 28);
       }
 
-      // Items Table Header
-      doc.fontSize(14).text('Order Items', { underline: true });
-      doc.moveDown(0.5);
+      yPos += 120;
 
-      const tableTop = doc.y;
-      doc.fontSize(10);
-      doc.text('Item', 50, tableTop);
-      doc.text('Qty', 200, tableTop);
-      doc.text('Price', 250, tableTop);
-      doc.text('Total', 320, tableTop);
+      // Order Items Table
+      doc.fontSize(12).font('Helvetica-Bold');
+      doc.fillColor(primaryColor).text('ORDER ITEMS', 40, yPos);
+      yPos += 10;
 
-      // Draw line under header
-      doc
-        .moveTo(50, tableTop + 15)
-        .lineTo(400, tableTop + 15)
-        .stroke();
+      // Table Header
+      doc.rect(40, yPos, 515, 25).fill(primaryColor);
+      doc.fillColor('#ffffff').fontSize(10);
+      doc.text('#', 50, yPos + 7);
+      doc.text('Item', 70, yPos + 7);
+      doc.text('SKU', 220, yPos + 7);
+      doc.text('Qty', 300, yPos + 7);
+      doc.text('Price', 350, yPos + 7);
+      doc.text('Total', 450, yPos + 7);
 
-      let position = tableTop + 25;
+      yPos += 25;
 
-      // Items
+      // Table Rows
+      let itemIndex = 0;
       for (const item of order.items) {
-        const itemName = item.variant.product.name;
-        const variantName = item.variant.sku
-          ? ` (SKU: ${item.variant.sku})`
-          : '';
-        const itemTotal = Number(item.price) * item.quantity;
+        itemIndex++;
+        const rowBg = itemIndex % 2 === 0 ? '#ffffff' : '#f7fafc';
+        doc.rect(40, yPos, 515, 30).fill(rowBg);
 
-        doc.text(`${itemName}${variantName}`, 50, position, { width: 140 });
-        doc.text(item.quantity.toString(), 200, position);
-        doc.text(`${Number(item.price).toFixed(2)}`, 250, position);
-        doc.text(`${itemTotal.toFixed(2)}`, 320, position);
+        doc.fillColor(secondaryColor).fontSize(9);
+        doc.text(itemIndex.toString(), 50, yPos + 10);
 
-        position += 20;
+        // Item name with product and variant attributes
+        const productName = item.variant.product.name;
+        const attributes = item.variant.attributes
+          .map(
+            (attr) =>
+              `${attr.attributeValue.attribute.name}: ${attr.attributeValue.value}`,
+          )
+          .join(', ');
+        const itemDetails = attributes
+          ? `${productName}\n${attributes}`
+          : productName;
+
+        doc.fillColor('#000000').fontSize(9);
+        doc.text(itemDetails, 70, yPos + 5, { width: 140 });
+
+        doc.fillColor(secondaryColor).fontSize(9);
+        doc.text(item.variant.sku || '-', 220, yPos + 10);
+        doc.text(item.quantity.toString(), 300, yPos + 10);
+        doc.text(`${Number(item.price).toFixed(2)}`, 350, yPos + 10);
+        doc.fillColor(primaryColor).fontSize(10);
+        doc.text(
+          `${(Number(item.price) * item.quantity).toFixed(2)}`,
+          450,
+          yPos + 10,
+        );
+
+        yPos += 30;
       }
 
-      // Draw line before total
-      doc
-        .moveTo(50, position + 5)
-        .lineTo(400, position + 5)
-        .stroke();
+      // Table Footer Line
+      doc.moveTo(40, yPos).lineTo(555, yPos).stroke(secondaryColor);
 
-      position += 20;
+      yPos += 10;
 
-      // Total
-      doc.fontSize(12);
-      doc.text('Total:', 250, position);
-      doc.text(`${Number(order.total).toFixed(2)}`, 320, position, {
-        bold: true,
-      });
+      // Subtotal, Shipping, Total
+      const totalsX = 350;
+      const valuesX = 450;
+
+      // Calculate item subtotal (total - delivery charge)
+      const deliveryCharge = Number(order.deliveryCharge) || 0;
+      const itemSubtotal = Number(order.total) - deliveryCharge;
+
+      doc.fontSize(10).font('Helvetica');
+      doc.fillColor(secondaryColor);
+      doc.text('Items Subtotal:', totalsX, yPos);
+      doc.text(`${itemSubtotal.toFixed(2)}`, valuesX, yPos);
+
+      yPos += 18;
+      doc.text('Delivery Charge:', totalsX, yPos);
+      doc.text(`${deliveryCharge.toFixed(2)}`, valuesX, yPos);
+
+      yPos += 18;
+      doc.rect(340, yPos - 5, 210, 30).fillAndStroke('#1a365d', '#1a365d');
+      doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold');
+      doc.text('GRAND TOTAL:', totalsX + 5, yPos);
+      doc.text(`${Number(order.total).toFixed(2)}`, valuesX, yPos);
+
+      yPos += 50;
 
       // Footer
-      doc.fontSize(10);
-      doc.text('Thank you for your purchase!', 50, 700, { align: 'center' });
+      doc.fontSize(9).font('Helvetica');
+      doc.fillColor(secondaryColor);
+      doc.text('Thank you for your purchase!', 297, yPos, { align: 'center' });
+      yPos += 15;
+      doc.text(
+        'For any queries, please contact us at support@manajiroriginals.com',
+        297,
+        yPos,
+        { align: 'center' },
+      );
+      yPos += 10;
+      doc.text(
+        'This is a computer-generated receipt and does not require a signature.',
+        297,
+        yPos,
+        { align: 'center' },
+      );
+
+      // Footer line
+      doc
+        .moveTo(50, yPos + 10)
+        .lineTo(545, yPos + 10)
+        .stroke(secondaryColor);
 
       doc.end();
     });

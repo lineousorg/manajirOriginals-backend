@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
+import { CategoryProductsQueryDto } from './dto/category-products.dto';
 import {
   PaginationQueryDto,
   PaginatedResponse,
@@ -171,6 +172,299 @@ export class ProductService {
       limit,
       lightweightProducts.length > 0 ? 'Products found' : 'No products found',
     );
+  }
+
+  /**
+   * Find products by category slug with server-side filtering
+   */
+  async findByCategory(
+    slug: string,
+    query: CategoryProductsQueryDto,
+  ): Promise<{
+    category: { id: number; name: string; slug: string } | null;
+    products: PaginatedResponse<any>;
+    filters: {
+      availableSizes: string[];
+      availableColors: { name: string; hex: string }[];
+      priceRange: { min: number; max: number };
+    };
+  }> {
+    const {
+      page = 1,
+      limit = 20,
+      minPrice,
+      minMaxPrice,
+      sizes,
+      colors,
+      sortBy = 'newest',
+    } = query;
+    const skip = (page - 1) * limit;
+
+    // First, find the category by slug (including parent categories)
+    const category = await this.prisma.category.findFirst({
+      where: {
+        OR: [{ slug }, { children: { some: { slug } } }],
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+      },
+    });
+
+    // If category is not found directly, check if it's a child category
+    let actualCategory = category;
+    if (!category) {
+      const childCategory = await this.prisma.category.findFirst({
+        where: { slug },
+        select: { id: true, name: true, slug: true },
+      });
+      actualCategory = childCategory;
+    }
+
+    if (!actualCategory) {
+      throw new NotFoundException(`Category not found: ${slug}`);
+    }
+
+    // Build the where clause for products
+    const whereClause: any = {
+      isDeleted: false,
+      OR: [
+        { categoryId: actualCategory.id },
+        { category: { parentId: actualCategory.id } },
+      ],
+    };
+
+    // Build orderBy
+    let orderBy: any = { createdAt: 'desc' };
+    switch (sortBy) {
+      case 'price-asc':
+        orderBy = { variants: { _min: { price: 'asc' } } };
+        break;
+      case 'price-desc':
+        orderBy = { variants: { _max: { price: 'desc' } } };
+        break;
+      case 'name-asc':
+        orderBy = { name: 'asc' };
+        break;
+      case 'name-desc':
+        orderBy = { name: 'desc' };
+        break;
+      default:
+        orderBy = { createdAt: 'desc' };
+    }
+
+    // Get all products in this category (without pagination) to calculate filters
+    const allProductsInCategory = await this.prisma.product.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        variants: {
+          where: { isDeleted: false },
+          select: {
+            price: true,
+            attributes: {
+              include: {
+                attributeValue: {
+                  include: {
+                    attribute: { select: { name: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        images: {
+          where: { type: 'PRODUCT' },
+          select: { url: true, position: true },
+          orderBy: { position: 'asc' },
+        },
+      },
+    });
+
+    // Extract available sizes and colors from all products
+    const sizeSet = new Set<string>();
+    const colorMap = new Map<string, { name: string; hex: string }>();
+    let minPriceFound = Infinity;
+    let maxPriceFound = 0;
+
+    for (const product of allProductsInCategory) {
+      for (const variant of product.variants) {
+        const price = Number(variant.price);
+        if (price < minPriceFound) minPriceFound = price;
+        if (price > maxPriceFound) maxPriceFound = price;
+
+        for (const attr of variant.attributes) {
+          const attrName = attr.attributeValue.attribute.name.toLowerCase();
+          if (attrName === 'size') {
+            sizeSet.add(attr.attributeValue.value);
+          } else if (attrName === 'color') {
+            if (!colorMap.has(attr.attributeValue.value)) {
+              colorMap.set(attr.attributeValue.value, {
+                name: attr.attributeValue.value,
+                hex: '#000000', // Default - frontend can override
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Apply price filter by modifying the where clause
+    if (minPrice !== undefined || minMaxPrice !== undefined) {
+      whereClause.variants = {
+        some: {
+          isDeleted: false,
+          price: {
+            gte: minPrice || 0,
+            ...(minMaxPrice && { lte: minMaxPrice }),
+          },
+        },
+      };
+    }
+
+    // Apply size and color filters
+    if (sizes && sizes.length > 0) {
+      whereClause.variants = {
+        ...whereClause.variants,
+        some: {
+          ...(whereClause.variants?.some || {}),
+          attributes: {
+            some: {
+              attributeValue: {
+                value: { in: sizes },
+                attribute: { name: { equals: 'size', mode: 'insensitive' } },
+              },
+            },
+          },
+        },
+      };
+    }
+
+    if (colors && colors.length > 0) {
+      whereClause.variants = {
+        ...whereClause.variants,
+        some: {
+          ...(whereClause.variants?.some || {}),
+          attributes: {
+            some: {
+              attributeValue: {
+                value: { in: colors },
+                attribute: { name: { equals: 'color', mode: 'insensitive' } },
+              },
+            },
+          },
+        },
+      };
+    }
+
+    // Fetch paginated products
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        orderBy,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          isActive: true,
+          createdAt: true,
+          category: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          variants: {
+            where: { isDeleted: false },
+            select: {
+              id: true,
+              sku: true,
+              price: true,
+              stock: true,
+              attributes: {
+                include: {
+                  attributeValue: {
+                    include: {
+                      attribute: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          images: {
+            where: { type: 'PRODUCT' },
+            select: {
+              url: true,
+              position: true,
+            },
+            orderBy: { position: 'asc' },
+            take: 1,
+          },
+        },
+      }),
+      this.prisma.product.count({ where: whereClause }),
+    ]);
+
+    // Transform products to lightweight format
+    const lightweightProducts = products.map((product) => {
+      const prices = product.variants.map((v) => Number(v.price));
+      const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
+
+      // Extract sizes and colors for this product
+      const productSizes = new Set<string>();
+      const productColors = new Set<string>();
+
+      for (const variant of product.variants) {
+        for (const attr of variant.attributes) {
+          const attrName = attr.attributeValue.attribute.name.toLowerCase();
+          if (attrName === 'size') {
+            productSizes.add(attr.attributeValue.value);
+          } else if (attrName === 'color') {
+            productColors.add(attr.attributeValue.value);
+          }
+        }
+      }
+
+      return {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        isActive: product.isActive,
+        createdAt: product.createdAt,
+        category: product.category,
+        thumbnail: product.images[0]?.url || null,
+        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+        totalStock,
+        hasVariants: product.variants.length > 0,
+        sizes: Array.from(productSizes),
+        colors: Array.from(productColors),
+      };
+    });
+
+    return {
+      category: actualCategory,
+      products: createPaginatedResponse(
+        lightweightProducts,
+        total,
+        page,
+        limit,
+        lightweightProducts.length > 0 ? 'Products found' : 'No products found',
+      ),
+      filters: {
+        availableSizes: Array.from(sizeSet).sort(),
+        availableColors: Array.from(colorMap.values()),
+        priceRange: {
+          min: minPriceFound === Infinity ? 0 : Math.floor(minPriceFound),
+          max: maxPriceFound === 0 ? 10000 : Math.ceil(maxPriceFound),
+        },
+      },
+    };
   }
 
   async findOne(id: number) {

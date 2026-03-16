@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   IsInt,
   IsNotEmpty,
@@ -9,7 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod, DeliveryType } from '@prisma/client';
 
 export class OrderItemDto {
   @IsInt()
@@ -31,4 +34,12 @@ export class CreateOrderDto {
   @IsEnum(PaymentMethod)
   @IsOptional()
   paymentMethod?: PaymentMethod = PaymentMethod.CASH_ON_DELIVERY;
+
+  @IsInt()
+  @IsOptional()
+  addressId?: number;
+
+  @IsEnum(DeliveryType)
+  @IsOptional()
+  deliveryType?: DeliveryType = DeliveryType.INSIDE_DHAKA;
 }

@@ -20,6 +20,7 @@ import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { CategoryProductsQueryDto } from './dto/category-products.dto';
 
 @Controller('products')
 export class ProductController {
@@ -35,6 +36,14 @@ export class ProductController {
   @Get()
   findAll(@Query() pagination: PaginationQueryDto) {
     return this.productService.findAll(pagination);
+  }
+
+  @Get('category/:slug')
+  findByCategory(
+    @Param('slug') slug: string,
+    @Query() query: CategoryProductsQueryDto,
+  ) {
+    return this.productService.findByCategory(slug, query);
   }
 
   @Get(':id')

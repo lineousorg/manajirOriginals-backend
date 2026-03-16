@@ -43,7 +43,7 @@ export class AddressService {
         address: dto.address,
         city: dto.city,
         postalCode: dto.postalCode,
-        country: dto.country,
+        country: dto.country || 'Bangladesh',
         isDefault: dto.isDefault || false,
         userId,
       },
