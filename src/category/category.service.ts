@@ -187,7 +187,7 @@ export class CategoryService {
             orderBy: { position: 'asc' },
           },
           _count: {
-            select: { products: true },
+            select: { products: { where: { isDeleted: false } } },
           },
         },
       }),
@@ -245,7 +245,7 @@ export class CategoryService {
           orderBy: { position: 'asc' },
         },
         _count: {
-          select: { products: true },
+          select: { products: { where: { isDeleted: false } } },
         },
       },
     });
