@@ -1,7 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Injectable,
   NotFoundException,
@@ -98,7 +95,7 @@ export class ProductService {
   async findAll(
     pagination: PaginationQueryDto,
   ): Promise<PaginatedResponse<any>> {
-    const { page = 1, limit = 20 } = pagination;
+    const { page = 1, limit = 10 } = pagination;
     const skip = (page - 1) * limit;
 
     // Fetch products with minimal data - variants just for price/stock calculation

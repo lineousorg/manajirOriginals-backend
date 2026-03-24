@@ -129,6 +129,19 @@ export class OrderService {
               email: true,
             },
           },
+          address: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              address: true,
+              city: true,
+              postalCode: true,
+              country: true,
+              isDefault: true,
+            },
+          },
           items: {
             select: {
               id: true,
@@ -234,6 +247,19 @@ export class OrderService {
                 email: true,
               },
             },
+            address: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+                address: true,
+                city: true,
+                postalCode: true,
+                country: true,
+                isDefault: true,
+              },
+            },
             items: {
               select: {
                 id: true,
@@ -299,6 +325,19 @@ export class OrderService {
           select: {
             id: true,
             email: true,
+          },
+        },
+        address: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            address: true,
+            city: true,
+            postalCode: true,
+            country: true,
+            isDefault: true,
           },
         },
         items: {
