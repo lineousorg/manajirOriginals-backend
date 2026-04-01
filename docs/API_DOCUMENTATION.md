@@ -16,6 +16,7 @@ All API endpoints are prefixed with `/api`.
 - [Addresses](#addresses)
 - [Attributes](#attributes)
 - [Attribute Values](#attribute-values)
+- [Stock Reservations](#stock-reservations)
 - [Error Handling](#error-handling)
 
 ---
@@ -1388,6 +1389,202 @@ Delete an attribute value. This will also remove the value from all variant attr
   "message": "Attribute value deleted successfully",
   "status": "success",
   "data": null
+}
+```
+
+---
+
+## Stock Reservations
+
+Stock reservation prevents overselling by reserving stock when users add items to their cart. Reservations expire after 15 minutes (configurable) and are automatically released by a scheduled cron job running every 5 minutes.
+
+### Reserve Stock
+Reserve stock for a product variant when user adds to cart.
+
+**Endpoint:** `POST /api/stock-reservation/reserve`
+
+**Access:** Requires Authentication (Customer)
+
+**Request Body:**
+```json
+{
+  "variantId": 123,
+  "quantity": 2,
+  "expirationMinutes": 15
+}
+```
+
+**Validation:**
+- `variantId`: Required, must be a valid variant ID
+- `quantity`: Required, must be at least 1
+- `expirationMinutes`: Optional, defaults to 15 minutes
+
+**Success Response (201):**
+```json
+{
+  "message": "Stock reserved successfully",
+  "status": "success",
+  "data": {
+    "reservationId": 456,
+    "variantId": 123,
+    "quantity": 2,
+    "expiresAt": "2026-03-31T20:23:35.000Z",
+    "availableStock": 1
+  }
+}
+```
+
+**Error Responses:**
+- `404`: Variant not found
+- `400`: Variant not active or deleted
+- `409`: Insufficient stock (e.g., "Only 1 items available. You requested 2.")
+
+---
+
+### Release Reservation
+Release a reservation when user removes item from cart.
+
+**Endpoint:** `POST /api/stock-reservation/release`
+
+**Access:** Requires Authentication (Customer)
+
+**Request Body:**
+```json
+{
+  "reservationId": 456
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "message": "Reservation released successfully",
+  "status": "success",
+  "data": {
+    "reservationId": 456
+  }
+}
+```
+
+**Error Response:**
+- `404`: Reservation not found or already released/expired
+
+---
+
+### Get My Reservations
+Get all active reservations for the current user.
+
+**Endpoint:** `GET /api/stock-reservation/my-reservations`
+
+**Access:** Requires Authentication (Customer)
+
+**Success Response (200):**
+```json
+{
+  "message": "Active reservations retrieved",
+  "status": "success",
+  "data": [
+    {
+      "id": 456,
+      "userId": 1,
+      "variantId": 123,
+      "quantity": 2,
+      "status": "ACTIVE",
+      "expiresAt": "2026-03-31T20:23:35.000Z",
+      "createdAt": "2026-03-31T20:08:35.000Z",
+      "variant": {
+        "id": 123,
+        "sku": "SKU-123456",
+        "price": 1500.00,
+        "product": {
+          "id": 100,
+          "name": "Classic T-Shirt",
+          "slug": "classic-t-shirt"
+        }
+      }
+    }
+  ]
+}
+```
+
+---
+
+### Get Available Stock
+Get available stock for a specific variant (considers active reservations).
+
+**Endpoint:** `GET /api/stock-reservation/available/:variantId`
+
+**Access:** Public
+
+**Success Response (200):**
+```json
+{
+  "message": "Available stock retrieved",
+  "status": "success",
+  "data": {
+    "variantId": 123,
+    "totalStock": 10,
+    "reservedStock": 2,
+    "availableStock": 8
+  }
+}
+```
+
+**Error Response:**
+- `404`: Variant not found
+
+---
+
+### Check Availability
+Quickly check if a specific quantity is available.
+
+**Endpoint:** `POST /api/stock-reservation/check`
+
+**Access:** Public
+
+**Request Body:**
+```json
+{
+  "variantId": 123,
+  "quantity": 3
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "available": true,
+  "message": "Stock available",
+  "availableStock": 8
+}
+```
+
+**Not Available Response (200):**
+```json
+{
+  "available": false,
+  "message": "Only 5 items available",
+  "availableStock": 5
+}
+```
+
+---
+
+### Release Expired Reservations
+Release all expired reservations (admin/cron endpoint).
+
+**Endpoint:** `POST /api/stock-reservation/release-expired`
+
+**Access:** Public (for cron job)
+
+**Success Response (200):**
+```json
+{
+  "message": "Expired reservations released",
+  "status": "success",
+  "data": {
+    "count": 3
+  }
 }
 ```
 

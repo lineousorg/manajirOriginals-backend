@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StockReservationService } from '../stock-reservation/stock-reservation.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
@@ -17,7 +18,10 @@ import {
 
 @Injectable()
 export class ProductService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private stockReservationService: StockReservationService,
+  ) {}
 
   async create(dto: CreateProductDto) {
     // Check if slug already exists
@@ -122,6 +126,7 @@ export class ProductService {
           variants: {
             where: { isDeleted: false },
             select: {
+              id: true,
               price: true,
               stock: true,
             },
@@ -142,25 +147,40 @@ export class ProductService {
       }),
     ]);
 
-    // Transform data to lightweight format
-    const lightweightProducts = products.map((product) => {
-      const prices = product.variants.map((v) => Number(v.price));
-      const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
+    // Calculate available stock for each product considering reservations
+    const lightweightProducts = await Promise.all(
+      products.map(async (product) => {
+        const prices = product.variants.map((v) => Number(v.price));
 
-      return {
-        id: product.id,
-        name: product.name,
-        slug: product.slug,
-        isActive: product.isActive,
-        createdAt: product.createdAt,
-        category: product.category,
-        thumbnail: product.images[0]?.url || null,
-        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
-        totalStock,
-        hasVariants: product.variants.length > 0,
-      };
-    });
+        // Calculate available stock considering reservations
+        let totalAvailableStock = 0;
+        for (const variant of product.variants) {
+          try {
+            const available =
+              await this.stockReservationService.getAvailableStock(variant.id);
+            totalAvailableStock += available.data.availableStock;
+          } catch {
+            // If error, use raw stock
+            totalAvailableStock += variant.stock;
+          }
+        }
+
+        return {
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          isActive: product.isActive,
+          createdAt: product.createdAt,
+          category: product.category,
+          thumbnail: product.images[0]?.url || null,
+          minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+          maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+          totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
+          availableStock: totalAvailableStock,
+          hasVariants: product.variants.length > 0,
+        };
+      }),
+    );
 
     return createPaginatedResponse(
       lightweightProducts,
@@ -238,6 +258,7 @@ export class ProductService {
           variants: {
             where: { isDeleted: false },
             select: {
+              id: true,
               price: true,
               stock: true,
             },
@@ -256,25 +277,40 @@ export class ProductService {
       this.prisma.product.count({ where: whereClause }),
     ]);
 
-    // Transform to lightweight format
-    const lightweightProducts = products.map((product) => {
-      const prices = product.variants.map((v) => Number(v.price));
-      const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
+    // Calculate available stock for each product considering reservations
+    const lightweightProducts = await Promise.all(
+      products.map(async (product) => {
+        const prices = product.variants.map((v) => Number(v.price));
 
-      return {
-        id: product.id,
-        name: product.name,
-        slug: product.slug,
-        isActive: product.isActive,
-        createdAt: product.createdAt,
-        category: product.category,
-        thumbnail: product.images[0]?.url || null,
-        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
-        totalStock,
-        hasVariants: product.variants.length > 0,
-      };
-    });
+        // Calculate available stock considering reservations
+        let totalAvailableStock = 0;
+        for (const variant of product.variants) {
+          try {
+            const available =
+              await this.stockReservationService.getAvailableStock(variant.id);
+            totalAvailableStock += available.data.availableStock;
+          } catch {
+            // If error, use raw stock
+            totalAvailableStock += variant.stock;
+          }
+        }
+
+        return {
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          isActive: product.isActive,
+          createdAt: product.createdAt,
+          category: product.category,
+          thumbnail: product.images[0]?.url || null,
+          minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+          maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+          totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
+          availableStock: totalAvailableStock,
+          hasVariants: product.variants.length > 0,
+        };
+      }),
+    );
 
     return createPaginatedResponse(
       lightweightProducts,
@@ -352,10 +388,27 @@ export class ProductService {
       },
     });
     if (!product) throw new NotFoundException('Product not found');
+
+    // Calculate available stock for each variant considering active reservations
+    const variantsWithAvailableStock = await Promise.all(
+      product.variants.map(async (variant) => {
+        const availableStock =
+          await this.stockReservationService.getAvailableStock(variant.id);
+        return {
+          ...variant,
+          availableStock: availableStock.data.availableStock,
+          reservedStock: availableStock.data.reservedStock,
+        };
+      }),
+    );
+
     return {
       message: 'Product found',
       status: 'success',
-      data: product,
+      data: {
+        ...product,
+        variants: variantsWithAvailableStock,
+      },
     };
   }
 

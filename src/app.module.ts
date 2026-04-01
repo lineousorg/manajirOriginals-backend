@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -13,6 +14,7 @@ import { AttributeValueModule } from './attribute-value/attribute-value.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { FileModule } from './common/file.module';
+import { StockReservationModule } from './stock-reservation/stock-reservation.module';
 
 @Module({
   imports: [
@@ -20,6 +22,7 @@ import { FileModule } from './common/file.module';
       rootPath: join(__dirname, '..', 'public'),
       serveRoot: '/public',
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     ProductModule,
@@ -30,6 +33,7 @@ import { FileModule } from './common/file.module';
     AttributeModule,
     AttributeValueModule,
     FileModule,
+    StockReservationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
