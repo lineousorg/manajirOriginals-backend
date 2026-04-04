@@ -5,6 +5,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Body,
   Param,
   UseGuards,
@@ -17,6 +18,8 @@ import {
   CheckAvailabilityDto,
 } from './dto/stock-reservation.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Role } from '@prisma/client';
 
 @Controller('stock-reservation')
 export class StockReservationController {
@@ -100,5 +103,16 @@ export class StockReservationController {
   @Post('release-expired')
   async releaseExpiredReservations() {
     return this.stockReservationService.releaseExpiredReservations();
+  }
+
+  /**
+   * Force clean ALL reservations regardless of expiration
+   * Admin endpoint for emergency cleanup
+   * POST /stock-reservation/force-clean
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('force-clean')
+  async forceCleanReservations() {
+    return this.stockReservationService.forceCleanAllReservations();
   }
 }

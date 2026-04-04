@@ -276,6 +276,12 @@ model OrderItem {
 
   quantity Int
   price    Decimal @db.Decimal(10, 2)
+
+  /**
+   * Optional reservation ID if this item was reserved before ordering
+   * Helps track stock properly during order cancellation
+   */
+  reservationId Int?
 }
 
 /**

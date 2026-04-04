@@ -22,6 +22,14 @@ export class OrderItemDto {
   @IsInt()
   @Min(1)
   quantity!: number;
+
+  /**
+   * Optional reservation ID if user reserved stock before ordering
+   * If provided, the stock is already decremented and should not be decremented again
+   */
+  @IsOptional()
+  @IsInt()
+  reservationId?: number;
 }
 
 export class CreateOrderDto {

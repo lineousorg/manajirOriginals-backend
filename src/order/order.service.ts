@@ -70,6 +70,7 @@ export class OrderService {
         variantId: item.variantId,
         quantity: item.quantity,
         price: variant.price,
+        reservationId: item.reservationId || null, // Track reservation if used
       };
     });
 
@@ -83,21 +84,61 @@ export class OrderService {
 
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
-      // Bulk update stock for all items at once
-      const stockUpdates = dto.items.map((item) => ({
-        id: item.variantId,
-        decrement: item.quantity,
-      }));
+      // Separate items with reservations from those without
+      const itemsWithReservation = dto.items.filter(item => item.reservationId);
+      const itemsWithoutReservation = dto.items.filter(item => !item.reservationId);
 
-      // Execute all stock updates in parallel
-      await Promise.all(
-        stockUpdates.map((update) =>
-          tx.productVariant.update({
-            where: { id: update.id },
-            data: { stock: { decrement: update.decrement } },
-          }),
-        ),
-      );
+      // For items WITH reservation: stock already decremented, just validate the reservation
+      for (const item of itemsWithReservation) {
+        const reservation = await tx.stockReservation.findUnique({
+          where: { id: item.reservationId },
+        });
+
+        if (!reservation || reservation.status !== 'ACTIVE') {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} is not valid or already used`,
+          );
+        }
+
+        if (reservation.variantId !== item.variantId) {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} does not match variant ${item.variantId}`,
+          );
+        }
+
+        if (reservation.quantity !== item.quantity) {
+          throw new BadRequestException(
+            `Reservation quantity (${reservation.quantity}) does not match order quantity (${item.quantity})`,
+          );
+        }
+
+        // Mark reservation as used
+        await tx.stockReservation.update({
+          where: { id: item.reservationId },
+          data: {
+            status: 'USED',
+            updatedAt: new Date(),
+          },
+        });
+      }
+
+      // For items WITHOUT reservation: decrement stock (legacy behavior)
+      if (itemsWithoutReservation.length > 0) {
+        const stockUpdates = itemsWithoutReservation.map((item) => ({
+          id: item.variantId,
+          decrement: item.quantity,
+        }));
+
+        // Execute all stock updates in parallel
+        await Promise.all(
+          stockUpdates.map((update) =>
+            tx.productVariant.update({
+              where: { id: update.id },
+              data: { stock: { decrement: update.decrement } },
+            }),
+          ),
+        );
+      }
 
       // Create the order
       return tx.order.create({
