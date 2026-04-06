@@ -50,4 +50,11 @@ export class CreateOrderDto {
   @IsEnum(DeliveryType)
   @IsOptional()
   deliveryType?: DeliveryType = DeliveryType.INSIDE_DHAKA;
+
+  /**
+   * Optional discount ID to apply to the order
+   */
+  @IsOptional()
+  @IsInt()
+  discountId?: number;
 }

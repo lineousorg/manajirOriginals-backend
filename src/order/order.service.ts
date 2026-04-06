@@ -19,10 +19,14 @@ import {
   PaginatedResponse,
   createPaginatedResponse,
 } from '../common/dto/pagination.dto';
+import { DiscountService, DiscountCalculation } from '../discount/discount.service';
 
 @Injectable()
 export class OrderService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private discountService: DiscountService,
+  ) {}
 
   /**
    * Create a new order
@@ -81,6 +85,36 @@ export class OrderService {
 
     // Add delivery charge to total
     total += deliveryCharge;
+
+    // Store original total before discount
+    const originalTotal = total;
+
+    // Apply discount if provided
+    let discountAmt = 0;
+    let discountDetails: DiscountCalculation | null = null;
+
+    if (dto.discountId) {
+      // Prepare order items for discount validation
+      const orderItemsForValidation = dto.items.map((item) => {
+        const variant = variants.find((v) => v.id === item.variantId)!;
+        return {
+          variantId: item.variantId,
+          quantity: item.quantity,
+          price: Number(variant.price),
+        };
+      });
+
+      // Validate and calculate discount
+      const calculated = await this.discountService.validateAndCalculate(
+        dto.discountId,
+        orderItemsForValidation,
+        total,
+      );
+
+      discountDetails = calculated;
+      discountAmt = calculated.appliedAmount;
+      total -= discountAmt;
+    }
 
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
@@ -149,6 +183,12 @@ export class OrderService {
           addressId: dto.addressId || null,
           deliveryType,
           deliveryCharge,
+          // Discount fields
+          discountId: discountDetails ? discountDetails.discountId : null,
+          discountType: discountDetails ? discountDetails.type : null,
+          discountVal: discountDetails ? discountDetails.value : null,
+          discountAmt: discountAmt > 0 ? discountAmt : null,
+          originalTotal: originalTotal,
           items: {
             create: orderItemsData,
           },
@@ -164,6 +204,11 @@ export class OrderService {
           deliveryCharge: true,
           createdAt: true,
           updatedAt: true,
+          discountId: true,
+          discountType: true,
+          discountVal: true,
+          discountAmt: true,
+          originalTotal: true,
           user: {
             select: {
               id: true,

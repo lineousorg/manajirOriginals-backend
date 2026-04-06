@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
@@ -16,12 +20,118 @@ import {
   createPaginatedResponse,
 } from '../common/dto/pagination.dto';
 
+export interface ProductDiscountInfo {
+  discountId: number;
+  type: 'PERCENTAGE' | 'FIXED';
+  value: number;
+  discountAmount: number;
+  discountedPrice: number;
+}
+
 @Injectable()
 export class ProductService {
   constructor(
     private prisma: PrismaService,
     private stockReservationService: StockReservationService,
   ) {}
+
+  /**
+   * Get active discount info for a product or category
+   */
+  async getDiscountInfo(
+    productId: number,
+    categoryId: number,
+  ): Promise<ProductDiscountInfo | null> {
+    const now = new Date();
+
+    // First, check for variant-specific discounts
+    const variantDiscount = await this.prisma.discount.findFirst({
+      where: {
+        isActive: true,
+        target: 'SPECIFIC_VARIANTS',
+        startsAt: { lte: now },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        discountVariants: {
+          some: {
+            variant: {
+              productId: productId,
+            },
+          },
+        },
+      },
+      orderBy: { value: 'desc' },
+    });
+
+    if (variantDiscount) {
+      return this.calculateDiscountInfo(variantDiscount, 0);
+    }
+
+    // Then check for category-specific discounts
+    const categoryDiscount = await this.prisma.discount.findFirst({
+      where: {
+        isActive: true,
+        target: 'SPECIFIC_CATEGORY',
+        startsAt: { lte: now },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        category: { id: categoryId },
+      },
+      orderBy: { value: 'desc' },
+    });
+
+    if (categoryDiscount) {
+      return this.calculateDiscountInfo(categoryDiscount, 0);
+    }
+
+    // Finally check for global discounts (ALL_PRODUCTS)
+    const globalDiscount = await this.prisma.discount.findFirst({
+      where: {
+        isActive: true,
+        target: 'ALL_PRODUCTS',
+        startsAt: { lte: now },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      orderBy: { value: 'desc' },
+    });
+
+    if (globalDiscount) {
+      return this.calculateDiscountInfo(globalDiscount, 0);
+    }
+
+    return null;
+  }
+
+  /**
+   * Calculate discount info for a given price
+   */
+  private calculateDiscountInfo(
+    discount: any,
+    price: number,
+  ): ProductDiscountInfo {
+    let discountAmount = 0;
+    let discountedPrice = price;
+
+    if (discount.type === 'PERCENTAGE') {
+      discountAmount = (price * Number(discount.value)) / 100;
+      if (discount.maxDiscountAmt) {
+        discountAmount = Math.min(
+          discountAmount,
+          Number(discount.maxDiscountAmt),
+        );
+      }
+    } else {
+      discountAmount = Number(discount.value);
+    }
+
+    discountedPrice = Math.max(0, price - discountAmount);
+
+    return {
+      discountId: discount.id,
+      type: discount.type,
+      value: Number(discount.value),
+      discountAmount,
+      discountedPrice,
+    };
+  }
 
   async create(dto: CreateProductDto) {
     // Check if slug already exists
@@ -117,6 +227,7 @@ export class ProductService {
           slug: true,
           isActive: true,
           createdAt: true,
+          categoryId: true,
           category: {
             select: {
               id: true,
@@ -147,40 +258,180 @@ export class ProductService {
       }),
     ]);
 
-    // Calculate available stock for each product considering reservations
-    const lightweightProducts = await Promise.all(
-      products.map(async (product) => {
-        const prices = product.variants.map((v) => Number(v.price));
+    if (products.length === 0) {
+      return createPaginatedResponse(
+        [],
+        total,
+        page,
+        limit,
+        'No products found',
+      );
+    }
 
-        // Calculate available stock considering reservations
-        let totalAvailableStock = 0;
-        for (const variant of product.variants) {
-          try {
-            const available =
-              await this.stockReservationService.getAvailableStock(variant.id);
-            totalAvailableStock += available.data.availableStock;
-          } catch {
-            // If error, use raw stock
-            totalAvailableStock += variant.stock;
-          }
+    // Collect all variant IDs and category IDs for batch queries
+    const variantIds = [
+      ...new Set(products.flatMap((p) => p.variants.map((v) => v.id))),
+    ];
+    const categoryIds = [...new Set(products.map((p) => p.categoryId))];
+    const productIds = products.map((p) => p.id);
+    const now = new Date();
+
+    // Batch fetch: active reservations for all variants and discounts
+    const [reservations, globalDiscounts, categoryDiscounts, variantDiscounts] =
+      await Promise.all([
+        this.prisma.stockReservation.groupBy({
+          by: ['variantId'],
+          where: {
+            variantId: { in: variantIds },
+            status: 'ACTIVE',
+            expiresAt: { gt: now },
+          },
+          _sum: { quantity: true },
+        }),
+        // Global discounts (all products)
+        this.prisma.discount.findMany({
+          where: {
+            isActive: true,
+            target: 'ALL_PRODUCTS',
+            startsAt: { lte: now },
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+          },
+          select: { id: true, type: true, value: true, target: true },
+        }) as Promise<any[]>,
+        // Category-specific discounts
+        this.prisma.discount.findMany({
+          where: {
+            isActive: true,
+            target: 'SPECIFIC_CATEGORY',
+            startsAt: { lte: now },
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            category: { id: { in: categoryIds } },
+          },
+          include: { category: { select: { id: true } } },
+        }) as Promise<any[]>,
+        // Variant-specific discounts
+        this.prisma.discount.findMany({
+          where: {
+            isActive: true,
+            target: 'SPECIFIC_VARIANTS',
+            startsAt: { lte: now },
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            discountVariants: { some: { variantId: { in: variantIds } } },
+          },
+          include: { discountVariants: { select: { variantId: true } } },
+        }) as Promise<any[]>,
+      ]);
+
+    // Build lookup maps for O(1) access
+    const reservationMap = new Map<number, number>();
+    for (const r of reservations) {
+      reservationMap.set(r.variantId, r._sum.quantity || 0);
+    }
+
+    const discountMap = new Map<string, ProductDiscountInfo>();
+
+    // Process global discounts (apply to all products)
+    for (const d of globalDiscounts) {
+      const discountInfo: ProductDiscountInfo = {
+        discountId: d.id,
+        type: d.type as 'PERCENTAGE' | 'FIXED',
+        value: Number(d.value),
+        discountAmount: 0,
+        discountedPrice: 0,
+      };
+      for (const pid of productIds) {
+        discountMap.set(`product:${pid}`, discountInfo);
+      }
+    }
+
+    // Process category-specific discounts
+    for (const d of categoryDiscounts) {
+      const discountInfo: ProductDiscountInfo = {
+        discountId: d.id,
+        type: d.type as 'PERCENTAGE' | 'FIXED',
+        value: Number(d.value),
+        discountAmount: 0,
+        discountedPrice: 0,
+      };
+      const discountCategoryId = d.category?.id;
+      if (discountCategoryId) {
+        const matchingProducts = products
+          .filter((p) => p.categoryId === discountCategoryId)
+          .map((p) => p.id);
+        for (const pid of matchingProducts) {
+          discountMap.set(`product:${pid}`, discountInfo);
         }
+      }
+    }
 
-        return {
-          id: product.id,
-          name: product.name,
-          slug: product.slug,
-          isActive: product.isActive,
-          createdAt: product.createdAt,
-          category: product.category,
-          thumbnail: product.images[0]?.url || null,
-          minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-          maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
-          totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
-          availableStock: totalAvailableStock,
-          hasVariants: product.variants.length > 0,
-        };
-      }),
-    );
+    // Process variant-specific discounts
+    for (const d of variantDiscounts) {
+      const discountInfo: ProductDiscountInfo = {
+        discountId: d.id,
+        type: d.type as 'PERCENTAGE' | 'FIXED',
+        value: Number(d.value),
+        discountAmount: 0,
+        discountedPrice: 0,
+      };
+      const variantIdsSet = new Set(
+        d.discountVariants?.map((dv: any) => dv.variantId) || [],
+      );
+      for (const p of products) {
+        const pVariantIds = p.variants.map((v) => v.id);
+        const hasMatch = pVariantIds.some((vid) => variantIdsSet.has(vid));
+        if (hasMatch) {
+          discountMap.set(`product:${p.id}`, discountInfo);
+        }
+      }
+    }
+
+    // Process products - now using O(1) lookups
+    const lightweightProducts = products.map((product) => {
+      const prices = product.variants.map((v) => Number(v.price));
+
+      // Calculate available stock from batch results
+      let totalAvailableStock = 0;
+      for (const variant of product.variants) {
+        const reserved = reservationMap.get(variant.id) || 0;
+        totalAvailableStock += Math.max(0, variant.stock - reserved);
+      }
+
+      // Get discount from map
+      const discountInfo = discountMap.get(`product:${product.id}`) || null;
+
+      // Calculate discounted price range
+      let minDiscountedPrice: number | null = null;
+      let maxDiscountedPrice: number | null = null;
+      if (discountInfo && prices.length > 0) {
+        const discountedPrices = prices.map(
+          (p) =>
+            p -
+            (discountInfo.type === 'PERCENTAGE'
+              ? Math.min(p * (discountInfo.value / 100), discountInfo.value)
+              : discountInfo.value),
+        );
+        minDiscountedPrice = Math.min(...discountedPrices);
+        maxDiscountedPrice = Math.max(...discountedPrices);
+      }
+
+      return {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        isActive: product.isActive,
+        createdAt: product.createdAt,
+        category: product.category,
+        thumbnail: product.images[0]?.url || null,
+        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+        minDiscountedPrice,
+        maxDiscountedPrice,
+        discount: discountInfo,
+        totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
+        availableStock: totalAvailableStock,
+        hasVariants: product.variants.length > 0,
+      };
+    });
 
     return createPaginatedResponse(
       lightweightProducts,
@@ -249,6 +500,7 @@ export class ProductService {
           slug: true,
           isActive: true,
           createdAt: true,
+          categoryId: true,
           category: {
             select: {
               id: true,
@@ -295,6 +547,30 @@ export class ProductService {
           }
         }
 
+        // Get discount info for this product
+        const discountInfo = await this.getDiscountInfo(
+          product.id,
+          product.categoryId,
+        );
+
+        // Calculate discounted price range if discount exists
+        let minDiscountedPrice: number | null = null;
+        let maxDiscountedPrice: number | null = null;
+        if (discountInfo && prices.length > 0) {
+          const discountedPrices = prices.map(
+            (p) =>
+              p -
+              (discountInfo.type === 'PERCENTAGE'
+                ? Math.min(
+                    (p * discountInfo.value) / 100,
+                    Number(discountInfo.value),
+                  )
+                : discountInfo.value),
+          );
+          minDiscountedPrice = Math.min(...discountedPrices);
+          maxDiscountedPrice = Math.max(...discountedPrices);
+        }
+
         return {
           id: product.id,
           name: product.name,
@@ -305,6 +581,9 @@ export class ProductService {
           thumbnail: product.images[0]?.url || null,
           minPrice: prices.length > 0 ? Math.min(...prices) : 0,
           maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+          minDiscountedPrice,
+          maxDiscountedPrice,
+          discount: discountInfo,
           totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
           availableStock: totalAvailableStock,
           hasVariants: product.variants.length > 0,
@@ -332,6 +611,7 @@ export class ProductService {
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        categoryId: true,
         category: {
           select: {
             id: true,
@@ -389,24 +669,72 @@ export class ProductService {
     });
     if (!product) throw new NotFoundException('Product not found');
 
+    // Get discount info for this product
+    const discountInfo = await this.getDiscountInfo(
+      product.id,
+      product.categoryId,
+    );
+
     // Calculate available stock for each variant considering active reservations
     const variantsWithAvailableStock = await Promise.all(
       product.variants.map(async (variant) => {
         const availableStock =
           await this.stockReservationService.getAvailableStock(variant.id);
+
+        // Calculate discounted price if discount exists
+        let discountedPrice: number | null = null;
+        if (discountInfo) {
+          const price = Number(variant.price);
+          if (discountInfo.type === 'PERCENTAGE') {
+            const discountAmt = Math.min(
+              (price * discountInfo.value) / 100,
+              Number(discountInfo.value),
+            );
+            discountedPrice = price - discountAmt;
+          } else {
+            discountedPrice = Math.max(0, price - discountInfo.value);
+          }
+        }
+
         return {
           ...variant,
+          price: Number(variant.price),
+          discountedPrice,
           availableStock: availableStock.data.availableStock,
           reservedStock: availableStock.data.reservedStock,
         };
       }),
     );
 
+    // Calculate price range with discounts
+    const prices = variantsWithAvailableStock.map((v) => v.price);
+    let minDiscountedPrice: number | null = null;
+    let maxDiscountedPrice: number | null = null;
+    if (discountInfo && prices.length > 0) {
+      const discountedPrices = prices.map(
+        (p) =>
+          p -
+          (discountInfo.type === 'PERCENTAGE'
+            ? Math.min(
+                (p * discountInfo.value) / 100,
+                Number(discountInfo.value),
+              )
+            : discountInfo.value),
+      );
+      minDiscountedPrice = Math.min(...discountedPrices);
+      maxDiscountedPrice = Math.max(...discountedPrices);
+    }
+
     return {
       message: 'Product found',
       status: 'success',
       data: {
         ...product,
+        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+        minDiscountedPrice,
+        maxDiscountedPrice,
+        discount: discountInfo,
         variants: variantsWithAvailableStock,
       },
     };
@@ -498,26 +826,24 @@ export class ProductService {
               isActive: true,
             },
           },
-          images: {
-            select: {
-              id: true,
-              url: true,
-              altText: true,
-              position: true,
-            },
-          },
         },
       });
     });
 
     return {
       message: 'Product updated successfully',
+      status: 'success',
       data: product,
     };
   }
 
+  /**
+   * Remove (soft delete) a product
+   */
   async remove(id: number) {
-    // Soft delete the product
+    await this.findOne(id);
+
+    // Soft delete - set isDeleted to true
     await this.prisma.product.update({
       where: { id },
       data: {
@@ -525,74 +851,106 @@ export class ProductService {
         deletedAt: new Date(),
       },
     });
+
+    // Also soft delete all variants
+    await this.prisma.productVariant.updateMany({
+      where: { productId: id },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+    });
+
     return {
-      message: 'Product deleted successfully',
+      message: 'Product removed successfully',
       status: 'success',
-      data: null,
     };
   }
 
-  // Toggle product active status
+  /**
+   * Toggle product active status
+   */
   async toggleProductActive(id: number) {
     const product = await this.prisma.product.findUnique({
       where: { id },
+      select: { id: true, isActive: true },
     });
-    if (!product) throw new NotFoundException('Product not found');
 
-    const updated = await this.prisma.product.update({
+    if (!product) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+
+    const updatedProduct = await this.prisma.product.update({
       where: { id },
       data: { isActive: !product.isActive },
+      select: {
+        id: true,
+        isActive: true,
+      },
     });
 
     return {
-      message: `Product ${updated.isActive ? 'activated' : 'deactivated'} successfully`,
+      message: `Product ${updatedProduct.isActive ? 'activated' : 'deactivated'} successfully`,
       status: 'success',
-      data: updated,
+      data: updatedProduct,
     };
   }
 
-  // Toggle variant active status
-  async toggleVariantActive(productId: number, variantId: number) {
-    // Verify product exists
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-    });
-    if (!product) throw new NotFoundException('Product not found');
+  /**
+   * Toggle variant active status
+   */
+  async toggleVariantActive(id: number, variantId: number) {
+    await this.findOne(id);
 
-    const variant = await this.prisma.productVariant.findUnique({
-      where: { id: variantId },
+    const variant = await this.prisma.productVariant.findFirst({
+      where: {
+        id: variantId,
+        productId: id,
+      },
     });
-    if (!variant || variant.productId !== productId) {
-      throw new NotFoundException('Variant not found');
+
+    if (!variant) {
+      throw new NotFoundException(
+        `Variant with ID ${variantId} not found in product`,
+      );
     }
 
-    const updated = await this.prisma.productVariant.update({
+    const updatedVariant = await this.prisma.productVariant.update({
       where: { id: variantId },
       data: { isActive: !variant.isActive },
+      select: {
+        id: true,
+        isActive: true,
+      },
     });
 
     return {
-      message: `Variant ${updated.isActive ? 'activated' : 'deactivated'} successfully`,
+      message: `Variant ${updatedVariant.isActive ? 'activated' : 'deactivated'} successfully`,
       status: 'success',
-      data: updated,
+      data: updatedVariant,
     };
   }
 
-  // Soft delete a variant
-  async removeVariant(productId: number, variantId: number) {
-    // Verify product exists
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-    });
-    if (!product) throw new NotFoundException('Product not found');
+  /**
+   * Remove a variant from a product
+   */
+  async removeVariant(id: number, variantId: number) {
+    await this.findOne(id);
 
-    const variant = await this.prisma.productVariant.findUnique({
-      where: { id: variantId },
+    const variant = await this.prisma.productVariant.findFirst({
+      where: {
+        id: variantId,
+        productId: id,
+      },
     });
-    if (!variant || variant.productId !== productId) {
-      throw new NotFoundException('Variant not found');
+
+    if (!variant) {
+      throw new NotFoundException(
+        `Variant with ID ${variantId} not found in product`,
+      );
     }
 
+    // Soft delete the variant
     await this.prisma.productVariant.update({
       where: { id: variantId },
       data: {
@@ -602,9 +960,35 @@ export class ProductService {
     });
 
     return {
-      message: 'Variant deleted successfully',
+      message: 'Variant removed successfully',
       status: 'success',
-      data: null,
+    };
+  }
+
+  async delete(id: number) {
+    await this.findOne(id);
+
+    // Soft delete - set isDeleted to true
+    await this.prisma.product.update({
+      where: { id },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+    });
+
+    // Also soft delete all variants
+    await this.prisma.productVariant.updateMany({
+      where: { productId: id },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+    });
+
+    return {
+      message: 'Product deleted successfully',
+      status: 'success',
     };
   }
 }
