@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsArray,
   ValidateNested,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -39,4 +40,8 @@ export class UpdateCategoryDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateCategoryImageDto)
   images?: UpdateCategoryImageDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

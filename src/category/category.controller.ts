@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Get,
@@ -39,6 +38,13 @@ export class CategoryController {
     @Body() dto: UpdateCategoryDto,
   ) {
     return this.categoryService.update(id, dto);
+  }
+
+  @Patch(':id/toggle-status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  toggleStatus(@Param('id', ParseIntPipe) id: number) {
+    return this.categoryService.toggleStatus(id);
   }
 
   @Get()

@@ -1,10 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   IsString,
   IsOptional,
   IsNumber,
   IsArray,
   ValidateNested,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -37,4 +37,8 @@ export class CreateCategoryDto {
   @ValidateNested({ each: true })
   @Type(() => CreateCategoryImageDto)
   images?: CreateCategoryImageDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

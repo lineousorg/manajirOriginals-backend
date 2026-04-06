@@ -1,6 +1,13 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateAttributeDto, UpdateAttributeDto } from './dto/create-attribute.dto';
+import {
+  CreateAttributeDto,
+  UpdateAttributeDto,
+} from './dto/create-attribute.dto';
 import { Attribute } from '@prisma/client';
 
 @Injectable()
@@ -51,7 +58,10 @@ export class AttributeService {
     });
 
     return {
-      message: attributes.length > 0 ? 'Attributes retrieved successfully' : 'No attributes found',
+      message:
+        attributes.length > 0
+          ? 'Attributes retrieved successfully'
+          : 'No attributes found',
       status: 'success',
       data: attributes,
     };

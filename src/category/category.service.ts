@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
+
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
@@ -44,6 +44,7 @@ export class CategoryService {
         name: dto.name,
         slug: dto.slug,
         parentId: dto.parentId ?? null,
+        isActive: dto.isActive ?? true,
         images: dto.images
           ? {
               create: dto.images.map((img, index) => ({
@@ -160,6 +161,7 @@ export class CategoryService {
           id: true,
           name: true,
           slug: true,
+          isActive: true,
           parentId: true,
           createdAt: true,
           updatedAt: true,
@@ -210,6 +212,7 @@ export class CategoryService {
         id: true,
         name: true,
         slug: true,
+        isActive: true,
         parentId: true,
         createdAt: true,
         updatedAt: true,
@@ -258,6 +261,29 @@ export class CategoryService {
       message: 'Category found',
       status: 'success',
       data: category,
+    };
+  }
+
+  async toggleStatus(id: number) {
+    const category = await this.prisma.category.findUnique({
+      where: { id },
+    });
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    const updated = await this.prisma.category.update({
+      where: { id },
+      data: {
+        isActive: !category.isActive,
+      },
+    });
+
+    return {
+      message: `Category is now ${updated.isActive ? 'active' : 'inactive'}`,
+      status: 'success',
+      data: updated,
     };
   }
 

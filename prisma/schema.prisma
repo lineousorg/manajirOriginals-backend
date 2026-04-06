@@ -107,9 +107,10 @@ model Address {
  */
 
 model Category {
-  id   Int    @id @default(autoincrement())
-  name String
-  slug String @unique
+  id       Int     @id @default(autoincrement())
+  name     String
+  slug     String  @unique
+  isActive Boolean  @default(true)
 
   parentId Int?
   parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
