@@ -246,6 +246,15 @@ model Image {
 
 model Order {
   id     Int  @id @default(autoincrement())
+  
+  // Custom order number: yyyymmddproductid (e.g., 202604071234)
+  // Note: Application handles uniqueness, not DB constraint
+  orderNumber String?
+  
+  // Invoice number: INV-productIdDDMMYY (e.g., INV-1234070426)
+  // Note: Application handles uniqueness, not DB constraint
+  invoiceNumber String?
+  
   userId Int
   user   User @relation(fields: [userId], references: [id])
 

@@ -19,6 +19,30 @@ import {
   createPaginatedResponse,
 } from '../common/dto/pagination.dto';
 
+/**
+ * Generate order number: yyyymmddproductid
+ * Example: 202604071234 (April 7, 2026, product ID 1234)
+ */
+function generateOrderNumber(productId: number): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}${month}${day}${productId}`;
+}
+
+/**
+ * Generate invoice number: INV-productIdDDMMYY
+ * Example: INV-1234070426 (Invoice for product 1234, date 07/04/26)
+ */
+function generateInvoiceNumber(productId: number): string {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = String(now.getFullYear()).slice(-2);
+  return `INV-${productId}${day}${month}${year}`;
+}
+
 @Injectable()
 export class OrderService {
   constructor(private prisma: PrismaService) {}
@@ -47,7 +71,13 @@ export class OrderService {
     }
 
     // Check stock availability for each item
+    // Only check stock for items WITHOUT reservation (reserved items already have stock decremented)
     for (const item of dto.items) {
+      // Skip stock check if item has a reservation - stock is already decremented
+      if (item.reservationId) {
+        continue;
+      }
+      
       const variant = variants.find((v) => v.id === item.variantId);
       if (!variant) continue;
 
@@ -80,6 +110,30 @@ export class OrderService {
 
     // Add delivery charge to total
     total += deliveryCharge;
+
+    // Get primary product ID for order/invoice number generation
+    // Use the first product in the order
+    const primaryProductId = variants[0]?.product?.id || 1;
+
+    // Generate order and invoice numbers (with fallback if duplicates exist)
+    let orderNumber = generateOrderNumber(primaryProductId);
+    let invoiceNumber = generateInvoiceNumber(primaryProductId);
+
+    // Check for duplicates and regenerate if necessary
+    const existingOrder = await this.prisma.order.findFirst({
+      where: { OR: [{ orderNumber }, { invoiceNumber }] },
+    });
+
+    if (existingOrder) {
+      // If duplicate, append sequential suffix based on existing orders count
+      const count = await this.prisma.order.count({
+        where: {
+          orderNumber: { startsWith: orderNumber },
+        },
+      });
+      orderNumber = `${orderNumber}-${count + 1}`;
+      invoiceNumber = `${invoiceNumber}-${count + 1}`;
+    }
 
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
@@ -142,6 +196,8 @@ export class OrderService {
       // Create the order
       return tx.order.create({
         data: {
+          orderNumber,
+          invoiceNumber,
           userId,
           paymentMethod: dto.paymentMethod || 'CASH_ON_DELIVERY',
           total,
@@ -154,6 +210,8 @@ export class OrderService {
         },
         select: {
           id: true,
+          orderNumber: true,
+          invoiceNumber: true,
           userId: true,
           addressId: true,
           status: true,
@@ -234,6 +292,8 @@ export class OrderService {
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
+            orderNumber: true,
+            invoiceNumber: true,
             addressId: true,
             status: true,
             paymentMethod: true,
@@ -273,6 +333,8 @@ export class OrderService {
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
+            orderNumber: true,
+            invoiceNumber: true,
             addressId: true,
             status: true,
             paymentMethod: true,
@@ -352,6 +414,8 @@ export class OrderService {
       where: { id },
       select: {
         id: true,
+        orderNumber: true,
+        invoiceNumber: true,
         userId: true,
         addressId: true,
         status: true,
@@ -548,8 +612,23 @@ export class OrderService {
     // Fetch order with all details including address
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: {
-        user: true,
+      select: {
+        id: true,
+        userId: true,
+        orderNumber: true,
+        invoiceNumber: true,
+        status: true,
+        paymentMethod: true,
+        total: true,
+        deliveryType: true,
+        deliveryCharge: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+          },
+        },
         address: true,
         items: {
           include: {
@@ -631,8 +710,8 @@ export class OrderService {
       doc.fillColor(secondaryColor);
 
       // First column
-      doc.text(`Receipt No:`, 55, yPos);
-      doc.text(`Order ID:`, 55, yPos + 15);
+      doc.text(`Order Number:`, 55, yPos);
+      doc.text(`Invoice Number:`, 55, yPos + 15);
       doc.text(`Order Date:`, 55, yPos + 30);
       doc.text(`Order Status:`, 55, yPos + 45);
 
@@ -643,8 +722,8 @@ export class OrderService {
 
       // Values (in black)
       doc.fillColor('#000000');
-      doc.text(`REC-${order.id.toString().padStart(6, '0')}`, 130, yPos);
-      doc.text(`#${order.id}`, 130, yPos + 15);
+      doc.text(order.orderNumber || `ORD-${order.id.toString().padStart(6, '0')}`, 150, yPos);
+      doc.text(order.invoiceNumber || `INV-${order.id.toString().padStart(6, '0')}`, 150, yPos + 15);
       doc.text(
         order.createdAt.toLocaleDateString('en-US', {
           year: 'numeric',

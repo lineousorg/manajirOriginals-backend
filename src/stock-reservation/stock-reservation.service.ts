@@ -301,7 +301,8 @@ export class StockReservationService {
     });
 
     const reservedQuantity = activeReservations._sum.quantity || 0;
-    const availableStock = variant.stock - reservedQuantity;
+    // Stock is already decremented on reservation, so available = current stock
+    const availableStock = variant.stock;
 
     return {
       message: 'Available stock retrieved',
