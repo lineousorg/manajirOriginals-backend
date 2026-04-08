@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
@@ -413,67 +414,22 @@ export class ProductService {
   }
 
   async update(id: number, dto: UpdateProductDto) {
-    await this.findOne(id);
-
     const { categoryId, variants, images, ...rest } = dto;
 
-    // Use transaction to handle foreign key constraints
-    const product = await this.prisma.$transaction(async (tx) => {
-      // Delete variant attributes and variants in bulk if variants are being updated
-      if (variants) {
-        // Get all variant IDs for this product
-        const existingVariants = await tx.productVariant.findMany({
-          where: { productId: id },
-          select: { id: true },
-        });
+    // Determine if we need a transaction (only for images/variants changes)
+    const needsTransaction =
+      (variants && variants.length > 0) || (images && images.length > 0);
 
-        // Delete all variant attributes for all variants at once
-        if (existingVariants.length > 0) {
-          const variantIds = existingVariants.map((v) => v.id);
-          await tx.variantAttribute.deleteMany({
-            where: { variantId: { in: variantIds } },
-          });
-        }
-
-        // Delete all variants at once
-        await tx.productVariant.deleteMany({
-          where: { productId: id },
-        });
+    // If no transaction needed, do a simple update
+    if (!needsTransaction) {
+      const updateData: any = { ...rest };
+      if (categoryId) {
+        updateData.category = { connect: { id: categoryId } };
       }
 
-      // Update product
-      return tx.product.update({
+      const updatedProduct = await this.prisma.product.update({
         where: { id },
-        data: {
-          ...rest,
-          ...(categoryId && {
-            category: {
-              connect: { id: categoryId },
-            },
-          }),
-
-          ...(variants && {
-            variants: {
-              create: variants.map((v) => ({
-                sku: v.sku,
-                price: v.price,
-                stock: v.stock,
-              })),
-            },
-          }),
-
-          ...(images && {
-            images: {
-              deleteMany: {},
-              create: images.map((img, index) => ({
-                url: img.url,
-                altText: img.altText ?? null,
-                position: img.position ?? index,
-                type: 'PRODUCT',
-              })),
-            },
-          }),
-        },
+        data: updateData,
         select: {
           id: true,
           name: true,
@@ -483,13 +439,10 @@ export class ProductService {
           createdAt: true,
           updatedAt: true,
           category: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-            },
+            select: { id: true, name: true, slug: true },
           },
           variants: {
+            where: { isDeleted: false },
             select: {
               id: true,
               sku: true,
@@ -499,21 +452,156 @@ export class ProductService {
             },
           },
           images: {
+            select: { id: true, url: true, altText: true, position: true },
+          },
+        },
+      });
+
+      return { message: 'Product updated successfully', data: updatedProduct };
+    }
+
+    // Use transaction only when needed for images/variants - with longer timeout
+    const product = await this.prisma.$transaction(async (tx) => {
+      // 1. Update basic product fields first
+      const updateData: any = { ...rest };
+      if (categoryId) {
+        updateData.category = { connect: { id: categoryId } };
+      }
+
+      // 2. Handle images - update existing or add new ones
+      if (images && images.length > 0) {
+        const imagesToUpdate = images.filter((img) => img.id);
+        const imagesToCreate = images.filter((img) => !img.id);
+
+        // Update all images in parallel
+        if (imagesToUpdate.length > 0) {
+          await Promise.all(
+            imagesToUpdate.map((img) =>
+              tx.image.update({
+                where: { id: img.id },
+                data: {
+                  url: img.url,
+                  altText: img.altText ?? null,
+                  position: img.position ?? 0,
+                },
+              }),
+            ),
+          );
+        }
+
+        // Create new images
+        if (imagesToCreate.length > 0) {
+          await tx.image.createMany({
+            data: imagesToCreate.map((img, index) => ({
+              productId: id,
+              url: img.url,
+              altText: img.altText ?? null,
+              position: img.position ?? index,
+              type: 'PRODUCT',
+            })),
+          });
+        }
+      }
+
+      // 3. Handle variants - optimized with parallel queries
+      if (variants && variants.length > 0) {
+        // Fetch existing variants once
+        const existingVariants = await tx.productVariant.findMany({
+          where: { productId: id, isDeleted: false },
+          select: { id: true, sku: true },
+        });
+
+        const existingVariantMap = new Map(
+          existingVariants.map((v) => [v.sku, v.id]),
+        );
+
+        // Separate variants with IDs (update) and without IDs (upsert by SKU)
+        const variantsToUpdate = variants.filter((v) => v.id);
+        const variantsToUpsert = variants.filter((v) => !v.id);
+
+        // Update existing variants by ID in parallel
+        if (variantsToUpdate.length > 0) {
+          await Promise.all(
+            variantsToUpdate.map((variant) =>
+              variant.id
+                ? tx.productVariant.update({
+                    where: { id: variant.id },
+                    data: {
+                      ...(variant.price !== undefined && {
+                        price: variant.price,
+                      }),
+                      ...(variant.stock !== undefined && {
+                        stock: variant.stock,
+                      }),
+                      ...(variant.sku !== undefined && { sku: variant.sku }),
+                    },
+                  })
+                : Promise.resolve(),
+            ),
+          );
+        }
+
+        // Upsert variants by checking if SKU exists - in parallel
+        if (variantsToUpsert.length > 0) {
+          const upsertPromises = variantsToUpsert.map((variant) => {
+            if (variant.sku && variant.price !== undefined) {
+              const existingId = existingVariantMap.get(variant.sku);
+              if (existingId) {
+                return tx.productVariant.update({
+                  where: { id: existingId },
+                  data: { price: variant.price, stock: variant.stock ?? 0 },
+                });
+              } else {
+                return tx.productVariant.create({
+                  data: {
+                    productId: id,
+                    sku: variant.sku,
+                    price: variant.price,
+                    stock: variant.stock ?? 0,
+                    isActive: true,
+                    isDeleted: false,
+                  },
+                });
+              }
+            }
+            return Promise.resolve();
+          });
+
+          await Promise.all(upsertPromises);
+        }
+      }
+
+      // Finally update the product basic fields
+      return tx.product.update({
+        where: { id },
+        data: updateData,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          category: { select: { id: true, name: true, slug: true } },
+          variants: {
+            where: { isDeleted: false },
             select: {
               id: true,
-              url: true,
-              altText: true,
-              position: true,
+              sku: true,
+              price: true,
+              stock: true,
+              isActive: true,
             },
+          },
+          images: {
+            select: { id: true, url: true, altText: true, position: true },
           },
         },
       });
     });
 
-    return {
-      message: 'Product updated successfully',
-      data: product,
-    };
+    return { message: 'Product updated successfully', data: product };
   }
 
   async remove(id: number) {

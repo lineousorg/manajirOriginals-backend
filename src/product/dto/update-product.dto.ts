@@ -9,14 +9,21 @@ import {
 import { Type } from 'class-transformer';
 
 export class UpdateProductVariantDto {
+  @IsOptional()
   @IsNumber()
-  price!: number;
+  id?: number;
 
+  @IsOptional()
   @IsNumber()
-  stock!: number;
+  price?: number;
 
+  @IsOptional()
+  @IsNumber()
+  stock?: number;
+
+  @IsOptional()
   @IsString()
-  sku!: string;
+  sku?: string;
 }
 
 export class UpdateProductImageDto {
