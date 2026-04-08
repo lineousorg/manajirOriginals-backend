@@ -8,15 +8,35 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class UpdateProductVariantDto {
+/**
+ * For updating or creating variants in product update:
+ * - WITH id: Update existing variant (only mutable fields)
+ * - WITHOUT id: Create new variant (required fields)
+ */
+export class ProductVariantUpdateDto {
+  @IsOptional()
   @IsNumber()
-  price!: number;
+  id?: number;
 
+  @IsOptional()
   @IsNumber()
-  stock!: number;
+  price?: number;
 
+  @IsOptional()
+  @IsNumber()
+  stock?: number;
+
+  @IsOptional()
   @IsString()
-  sku!: string;
+  sku?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isDeleted?: boolean;
 }
 
 export class UpdateProductImageDto {
@@ -53,11 +73,17 @@ export class UpdateProductDto {
   @IsNumber()
   categoryId?: number;
 
+  /**
+   * Variants array:
+   * - WITH id: Update existing variant (price/stock/sku/isActive/isDeleted)
+   * - WITHOUT id: Create new variant (price/stock required, optional sku/isActive)
+   * - NOT in array: Soft delete (mark isDeleted = true)
+   */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => UpdateProductVariantDto)
-  variants?: UpdateProductVariantDto[];
+  @Type(() => ProductVariantUpdateDto)
+  variants?: ProductVariantUpdateDto[];
 
   @IsOptional()
   @IsArray()

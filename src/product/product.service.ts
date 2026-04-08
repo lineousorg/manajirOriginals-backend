@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockReservationService } from '../stock-reservation/stock-reservation.service';
@@ -413,35 +414,113 @@ export class ProductService {
   }
 
   async update(id: number, dto: UpdateProductDto) {
-    await this.findOne(id);
+    // First verify product exists
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
 
     const { categoryId, variants, images, ...rest } = dto;
 
-    // Use transaction to handle foreign key constraints
+    // Use transaction to handle all variant operations atomically
     const product = await this.prisma.$transaction(async (tx) => {
-      // Delete variant attributes and variants in bulk if variants are being updated
-      if (variants) {
-        // Get all variant IDs for this product
-        const existingVariants = await tx.productVariant.findMany({
-          where: { productId: id },
-          select: { id: true },
-        });
+      // Get existing variants (not deleted)
+      const existingVariants = await tx.productVariant.findMany({
+        where: { productId: id, isDeleted: false },
+        select: { id: true },
+      });
 
-        // Delete all variant attributes for all variants at once
-        if (existingVariants.length > 0) {
-          const variantIds = existingVariants.map((v) => v.id);
-          await tx.variantAttribute.deleteMany({
-            where: { variantId: { in: variantIds } },
+      // Process variants if provided
+      if (variants && variants.length > 0) {
+        // Separate variants with id (update) vs without id (create new)
+        const variantsToUpdate = variants.filter((v) => v.id);
+        const variantsToCreate = variants.filter((v) => !v.id);
+
+        // Get IDs from the request
+        const requestedVariantIds = variantsToUpdate.map((v) => v.id);
+        const existingVariantIds = existingVariants.map((v) => v.id);
+
+        // Soft-delete variants NOT in the request
+        const variantsToDelete = existingVariantIds.filter(
+          (vid) => !requestedVariantIds.includes(vid),
+        );
+
+        if (variantsToDelete.length > 0) {
+          await tx.productVariant.updateMany({
+            where: { id: { in: variantsToDelete } },
+            data: { isDeleted: true, deletedAt: new Date() },
           });
         }
 
-        // Delete all variants at once
-        await tx.productVariant.deleteMany({
-          where: { productId: id },
-        });
+        // Update existing variants (only mutable fields: price, stock, sku, isActive, isDeleted)
+        for (const variantUpdate of variantsToUpdate) {
+          const updateData: Record<string, unknown> = {};
+          if (variantUpdate.price !== undefined) {
+            updateData.price = variantUpdate.price;
+          }
+          if (variantUpdate.stock !== undefined) {
+            updateData.stock = variantUpdate.stock;
+          }
+          if (variantUpdate.sku !== undefined) {
+            updateData.sku = variantUpdate.sku;
+          }
+          if (variantUpdate.isActive !== undefined) {
+            updateData.isActive = variantUpdate.isActive;
+          }
+          if (variantUpdate.isDeleted !== undefined) {
+            updateData.isDeleted = variantUpdate.isDeleted;
+            updateData.deletedAt = variantUpdate.isDeleted ? new Date() : null;
+          }
+
+          await tx.productVariant.update({
+            where: { id: variantUpdate.id },
+            data: updateData,
+          });
+        }
+
+        // Create new variants (without id = new variant)
+        // For new variants, price and stock are required
+        if (variantsToCreate.length > 0) {
+          for (const newVariant of variantsToCreate) {
+            if (
+              newVariant.price === undefined ||
+              newVariant.stock === undefined
+            ) {
+              throw new BadRequestException(
+                'New variants must have price and stock defined',
+              );
+            }
+
+            await tx.productVariant.create({
+              data: {
+                productId: id,
+                sku:
+                  newVariant.sku ||
+                  `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                price: newVariant.price,
+                stock: newVariant.stock,
+                isActive: newVariant.isActive ?? true,
+                isDeleted: false,
+              },
+            });
+          }
+        }
+      } else if (variants !== undefined) {
+        // variants array provided but empty - soft delete ALL existing variants
+        const allVariantIds = existingVariants.map((v) => v.id);
+        if (allVariantIds.length > 0) {
+          await tx.productVariant.updateMany({
+            where: { id: { in: allVariantIds } },
+            data: { isDeleted: true, deletedAt: new Date() },
+          });
+        }
       }
 
-      // Update product
+      // Update product main fields
       return tx.product.update({
         where: { id },
         data: {
@@ -451,17 +530,6 @@ export class ProductService {
               connect: { id: categoryId },
             },
           }),
-
-          ...(variants && {
-            variants: {
-              create: variants.map((v) => ({
-                sku: v.sku,
-                price: v.price,
-                stock: v.stock,
-              })),
-            },
-          }),
-
           ...(images && {
             images: {
               deleteMany: {},
@@ -490,6 +558,7 @@ export class ProductService {
             },
           },
           variants: {
+            where: { isDeleted: false },
             select: {
               id: true,
               sku: true,
