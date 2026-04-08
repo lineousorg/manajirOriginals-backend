@@ -16,7 +16,7 @@ export class StockReservationService {
   /**
    * Reserve stock for a user
    * Creates a reservation and decrements actual stock
-   * Uses pessimistic locking to prevent race conditions
+   * Uses atomic update to prevent race conditions
    */
   async reserveStock(
     userId: number,
@@ -35,8 +35,7 @@ export class StockReservationService {
 
     // Create reservation and decrement stock in a transaction
     const result = await this.prisma.$transaction(async (tx) => {
-      // Use pessimistic locking (SELECT FOR UPDATE) to prevent race conditions
-      // This locks the variant row until transaction completes
+      // First, validate variant exists and is active
       const variant = await tx.productVariant.findUnique({
         where: { id: variantId },
         select: { id: true, stock: true, isActive: true, isDeleted: true },
@@ -54,19 +53,9 @@ export class StockReservationService {
         throw new BadRequestException('This variant has been deleted');
       }
 
-      // Calculate available stock (total - active reservations)
-      // Note: We check reservations BEFORE decrementing to prevent overselling
-      const activeReservations = await tx.stockReservation.aggregate({
-        where: {
-          variantId,
-          status: 'ACTIVE',
-          expiresAt: { gt: new Date() },
-        },
-        _sum: { quantity: true },
-      });
-
-      const reservedQuantity = activeReservations._sum.quantity || 0;
-      const availableStock = variant.stock - reservedQuantity;
+      // Stock is already decremented when reservation is created,
+      // so available = current stock
+      const availableStock = variant.stock;
 
       if (quantity > availableStock) {
         throw new ConflictException(
@@ -74,32 +63,34 @@ export class StockReservationService {
         );
       }
 
-      // Additional safety check: ensure stock won't go negative
-      // This is a safeguard against any race condition edge cases
-      const projectedStock = variant.stock - quantity;
-      if (projectedStock < 0) {
-        throw new ConflictException(
-          'Unable to reserve stock due to concurrent modification. Please try again.',
-        );
-      }
-
-      // Decrement actual stock
-      const updatedVariant = await tx.productVariant.update({
-        where: { id: variantId },
+      // Atomic update: only decrement if stock is sufficient
+      // This prevents race conditions by ensuring the update only succeeds
+      // when stock is still available
+      const updatedVariant = await tx.productVariant.updateMany({
+        where: {
+          id: variantId,
+          stock: { gte: quantity }, // Only update if stock >= quantity
+        },
         data: { stock: { decrement: quantity } },
       });
 
-      // Double-check stock didn't go negative (should never happen with our checks)
-      if (updatedVariant.stock < 0) {
-        // Rollback by incrementing back
-        await tx.productVariant.update({
+      // Check if update was successful (count === 1 means it worked)
+      if (updatedVariant.count === 0) {
+        // Stock was modified by another request, fetch current state
+        const currentVariant = await tx.productVariant.findUnique({
           where: { id: variantId },
-          data: { stock: { increment: quantity } },
+          select: { stock: true },
         });
         throw new ConflictException(
-          'Stock reservation failed due to concurrent modification. Please try again.',
+          `Unable to reserve stock. Current available: ${currentVariant?.stock || 0}. Please try again.`,
         );
       }
+
+      // Get updated stock for response
+      const finalVariant = await tx.productVariant.findUnique({
+        where: { id: variantId },
+        select: { stock: true },
+      });
 
       // Create the reservation
       const reservation = await tx.stockReservation.create({
@@ -121,7 +112,7 @@ export class StockReservationService {
         },
       });
 
-      return { reservation, availableStock };
+      return { reservation, availableStock: finalVariant?.stock || 0 };
     });
 
     return {
@@ -301,7 +292,8 @@ export class StockReservationService {
     });
 
     const reservedQuantity = activeReservations._sum.quantity || 0;
-    // Stock is already decremented on reservation, so available = current stock
+    // Stock is already decremented when reservation is created,
+    // so available = current stock (not stock - reservedQuantity)
     const availableStock = variant.stock;
 
     return {
@@ -337,17 +329,9 @@ export class StockReservationService {
       };
     }
 
-    const activeReservations = await this.prisma.stockReservation.aggregate({
-      where: {
-        variantId,
-        status: 'ACTIVE',
-        expiresAt: { gt: new Date() },
-      },
-      _sum: { quantity: true },
-    });
-
-    const reservedQuantity = activeReservations._sum.quantity || 0;
-    const availableStock = variant.stock - reservedQuantity;
+    // Stock is already decremented when reservation is created,
+    // so available = current stock
+    const availableStock = variant.stock;
 
     return {
       available: quantity <= availableStock,

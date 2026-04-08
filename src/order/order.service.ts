@@ -50,6 +50,7 @@ export class OrderService {
   /**
    * Create a new order
    * Security: Only authenticated users can create orders
+   * All stock checks and reservation validations happen inside transaction
    */
   async create(
     userId: number,
@@ -59,7 +60,7 @@ export class OrderService {
     status: string;
     data: Order;
   }> {
-    // Validate all variants exist and have sufficient stock
+    // Validate all variants exist
     const variantIds = dto.items.map((item) => item.variantId);
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: variantIds } },
@@ -70,25 +71,7 @@ export class OrderService {
       throw new NotFoundException('One or more product variants not found');
     }
 
-    // Check stock availability for each item
-    // Only check stock for items WITHOUT reservation (reserved items already have stock decremented)
-    for (const item of dto.items) {
-      // Skip stock check if item has a reservation - stock is already decremented
-      if (item.reservationId) {
-        continue;
-      }
-      
-      const variant = variants.find((v) => v.id === item.variantId);
-      if (!variant) continue;
-
-      if (variant.stock < item.quantity) {
-        throw new BadRequestException(
-          `Insufficient stock for variant ${variant.sku}. Available: ${variant.stock}, Requested: ${item.quantity}`,
-        );
-      }
-    }
-
-    // Calculate total and create order items
+    // Calculate total and create order items (outside transaction - just for pricing)
     let total = 0;
     const orderItemsData = dto.items.map((item) => {
       const variant = variants.find((v) => v.id === item.variantId)!;
@@ -99,33 +82,29 @@ export class OrderService {
         variantId: item.variantId,
         quantity: item.quantity,
         price: variant.price,
-        reservationId: item.reservationId || null, // Track reservation if used
+        reservationId: item.reservationId || null,
       };
     });
 
-    // Calculate delivery charge based on delivery type
+    // Calculate delivery charge
     const deliveryType = dto.deliveryType || DeliveryType.INSIDE_DHAKA;
     const deliveryCharge =
       deliveryType === DeliveryType.INSIDE_DHAKA ? 70 : 150;
-
-    // Add delivery charge to total
     total += deliveryCharge;
 
     // Get primary product ID for order/invoice number generation
-    // Use the first product in the order
     const primaryProductId = variants[0]?.product?.id || 1;
 
-    // Generate order and invoice numbers (with fallback if duplicates exist)
+    // Generate order and invoice numbers
     let orderNumber = generateOrderNumber(primaryProductId);
     let invoiceNumber = generateInvoiceNumber(primaryProductId);
 
-    // Check for duplicates and regenerate if necessary
+    // Check for duplicates
     const existingOrder = await this.prisma.order.findFirst({
       where: { OR: [{ orderNumber }, { invoiceNumber }] },
     });
 
     if (existingOrder) {
-      // If duplicate, append sequential suffix based on existing orders count
       const count = await this.prisma.order.count({
         where: {
           orderNumber: { startsWith: orderNumber },
@@ -141,24 +120,46 @@ export class OrderService {
       const itemsWithReservation = dto.items.filter(item => item.reservationId);
       const itemsWithoutReservation = dto.items.filter(item => !item.reservationId);
 
-      // For items WITH reservation: stock already decremented, just validate the reservation
+      // Issue #4 & #5: For items WITH reservation: validate ownership, expiration, and status
       for (const item of itemsWithReservation) {
         const reservation = await tx.stockReservation.findUnique({
           where: { id: item.reservationId },
         });
 
+        // Validate reservation exists
         if (!reservation || reservation.status !== 'ACTIVE') {
           throw new BadRequestException(
             `Reservation ${item.reservationId} is not valid or already used`,
           );
         }
 
+        // Issue #5: Validate reservation ownership
+        if (reservation.userId !== userId) {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} does not belong to this user`,
+          );
+        }
+
+        // Issue #4: Validate reservation hasn't expired
+        if (new Date() > reservation.expiresAt) {
+          // Stock was already decremented, restore it
+          await tx.productVariant.update({
+            where: { id: reservation.variantId },
+            data: { stock: { increment: reservation.quantity } },
+          });
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} has expired. Please reserve again.`,
+          );
+        }
+
+        // Validate variant matches
         if (reservation.variantId !== item.variantId) {
           throw new BadRequestException(
             `Reservation ${item.reservationId} does not match variant ${item.variantId}`,
           );
         }
 
+        // Validate quantity matches
         if (reservation.quantity !== item.quantity) {
           throw new BadRequestException(
             `Reservation quantity (${reservation.quantity}) does not match order quantity (${item.quantity})`,
@@ -175,22 +176,29 @@ export class OrderService {
         });
       }
 
-      // For items WITHOUT reservation: decrement stock (legacy behavior)
-      if (itemsWithoutReservation.length > 0) {
-        const stockUpdates = itemsWithoutReservation.map((item) => ({
-          id: item.variantId,
-          decrement: item.quantity,
-        }));
+      // Issue #3: For items WITHOUT reservation: use atomic update inside transaction
+      for (const item of itemsWithoutReservation) {
+        const variant = variants.find((v) => v.id === item.variantId);
+        if (!variant) continue;
 
-        // Execute all stock updates in parallel
-        await Promise.all(
-          stockUpdates.map((update) =>
-            tx.productVariant.update({
-              where: { id: update.id },
-              data: { stock: { decrement: update.decrement } },
-            }),
-          ),
-        );
+        // Atomic update: only succeeds if stock is sufficient
+        const result = await tx.productVariant.updateMany({
+          where: {
+            id: item.variantId,
+            stock: { gte: item.quantity },
+          },
+          data: { stock: { decrement: item.quantity } },
+        });
+
+        if (result.count === 0) {
+          const currentVariant = await tx.productVariant.findUnique({
+            where: { id: item.variantId },
+            select: { stock: true, sku: true },
+          });
+          throw new BadRequestException(
+            `Insufficient stock for variant ${currentVariant?.sku || item.variantId}. Available: ${currentVariant?.stock || 0}, Requested: ${item.quantity}`,
+          );
+        }
       }
 
       // Create the order
@@ -573,23 +581,30 @@ export class OrderService {
       },
     });
 
-    // If order is cancelled, restore stock using bulk update
+    // If order is cancelled, restore stock and release reservations
     if (dto.status === OrderStatus.CANCELLED) {
       await this.prisma.$transaction(async (tx) => {
         const orderItems = await tx.orderItem.findMany({
           where: { orderId: id },
-          select: { variantId: true, quantity: true },
+          select: { variantId: true, quantity: true, reservationId: true },
         });
 
-        // Bulk restore stock for all items
-        await Promise.all(
-          orderItems.map((item) =>
-            tx.productVariant.update({
+        // Process each order item
+        for (const item of orderItems) {
+          // If there's a reservation, release it (set status to RELEASED)
+          if (item.reservationId) {
+            await tx.stockReservation.updateMany({
+              where: { id: item.reservationId, status: 'USED' },
+              data: { status: 'RELEASED', updatedAt: new Date() },
+            });
+          } else {
+            // No reservation: restore the stock
+            await tx.productVariant.update({
               where: { id: item.variantId },
               data: { stock: { increment: item.quantity } },
-            }),
-          ),
-        );
+            });
+          }
+        }
       });
     }
 
