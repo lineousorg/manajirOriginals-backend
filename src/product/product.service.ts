@@ -460,145 +460,154 @@ export class ProductService {
       return { message: 'Product updated successfully', data: updatedProduct };
     }
 
-    // Use transaction only when needed for images/variants - with longer timeout
-    const product = await this.prisma.$transaction(async (tx) => {
-      // 1. Update basic product fields first
-      const updateData: any = { ...rest };
-      if (categoryId) {
-        updateData.category = { connect: { id: categoryId } };
+    // Run operations sequentially (no transaction - more reliable)
+    // 1. Update basic product fields first
+    const updateData: any = { ...rest };
+    if (categoryId) {
+      updateData.category = { connect: { id: categoryId } };
+    }
+
+    // 2. Handle images - update existing or add new ones
+    if (images && images.length > 0) {
+      const imagesToUpdate = images.filter((img) => img.id);
+      const imagesToCreate = images.filter((img) => !img.id);
+
+      // Update all images in parallel
+      if (imagesToUpdate.length > 0) {
+        await Promise.all(
+          imagesToUpdate.map((img) =>
+            this.prisma.image.update({
+              where: { id: img.id },
+              data: {
+                url: img.url,
+                altText: img.altText ?? null,
+                position: img.position ?? 0,
+              },
+            }),
+          ),
+        );
       }
 
-      // 2. Handle images - update existing or add new ones
-      if (images && images.length > 0) {
-        const imagesToUpdate = images.filter((img) => img.id);
-        const imagesToCreate = images.filter((img) => !img.id);
+      // Create new images
+      if (imagesToCreate.length > 0) {
+        await this.prisma.image.createMany({
+          data: imagesToCreate.map((img, index) => ({
+            productId: id,
+            url: img.url,
+            altText: img.altText ?? null,
+            position: img.position ?? index,
+            type: 'PRODUCT',
+          })),
+        });
+      }
+    }
 
-        // Update all images in parallel
-        if (imagesToUpdate.length > 0) {
-          await Promise.all(
-            imagesToUpdate.map((img) =>
-              tx.image.update({
-                where: { id: img.id },
+    // 3. Handle variants - optimized with parallel queries
+    if (variants && variants.length > 0) {
+      // Fetch existing variants once
+      const existingVariants = await this.prisma.productVariant.findMany({
+        where: { productId: id, isDeleted: false },
+        select: { id: true, sku: true },
+      });
+
+      const existingVariantMap = new Map(
+        existingVariants.map((v) => [v.sku, v.id]),
+      );
+
+      // Separate variants with IDs (update) and without IDs (upsert by SKU)
+      const variantsToUpdate = variants.filter((v) => v.id);
+      const variantsToUpsert = variants.filter((v) => !v.id);
+
+      // Update existing variants by ID in parallel
+      if (variantsToUpdate.length > 0) {
+        await Promise.all(
+          variantsToUpdate.map((variant) =>
+            variant.id
+              ? this.prisma.productVariant.update({
+                  where: { id: variant.id },
+                  data: {
+                    ...(variant.price !== undefined && {
+                      price: variant.price,
+                    }),
+                    ...(variant.stock !== undefined && {
+                      stock: variant.stock,
+                    }),
+                    ...(variant.sku !== undefined && { sku: variant.sku }),
+                  },
+                })
+              : Promise.resolve(),
+          ),
+        );
+      }
+
+      // Upsert variants by checking if SKU exists - in parallel
+      if (variantsToUpsert.length > 0) {
+        const upsertPromises = variantsToUpsert.map((variant) => {
+          if (variant.sku && variant.price !== undefined) {
+            const existingId = existingVariantMap.get(variant.sku);
+            if (existingId) {
+              return this.prisma.productVariant.update({
+                where: { id: existingId },
+                data: { price: variant.price, stock: variant.stock ?? 0 },
+              });
+            } else {
+              // Create new variant with attributes
+              const hasAttributes =
+                variant.attributes && variant.attributes.length > 0;
+              return this.prisma.productVariant.create({
                 data: {
-                  url: img.url,
-                  altText: img.altText ?? null,
-                  position: img.position ?? 0,
+                  productId: id,
+                  sku: variant.sku,
+                  price: variant.price,
+                  stock: variant.stock ?? 0,
+                  isActive: true,
+                  isDeleted: false,
+                  // Connect attributes if provided
+                  ...(hasAttributes && {
+                    attributes: {
+                      create: variant.attributes!.map((attr) => ({
+                        attributeValueId: attr.valueId,
+                      })),
+                    },
+                  }),
                 },
-              }),
-            ),
-          );
-        }
-
-        // Create new images
-        if (imagesToCreate.length > 0) {
-          await tx.image.createMany({
-            data: imagesToCreate.map((img, index) => ({
-              productId: id,
-              url: img.url,
-              altText: img.altText ?? null,
-              position: img.position ?? index,
-              type: 'PRODUCT',
-            })),
-          });
-        }
-      }
-
-      // 3. Handle variants - optimized with parallel queries
-      if (variants && variants.length > 0) {
-        // Fetch existing variants once
-        const existingVariants = await tx.productVariant.findMany({
-          where: { productId: id, isDeleted: false },
-          select: { id: true, sku: true },
+              });
+            }
+          }
+          return Promise.resolve();
         });
 
-        const existingVariantMap = new Map(
-          existingVariants.map((v) => [v.sku, v.id]),
-        );
-
-        // Separate variants with IDs (update) and without IDs (upsert by SKU)
-        const variantsToUpdate = variants.filter((v) => v.id);
-        const variantsToUpsert = variants.filter((v) => !v.id);
-
-        // Update existing variants by ID in parallel
-        if (variantsToUpdate.length > 0) {
-          await Promise.all(
-            variantsToUpdate.map((variant) =>
-              variant.id
-                ? tx.productVariant.update({
-                    where: { id: variant.id },
-                    data: {
-                      ...(variant.price !== undefined && {
-                        price: variant.price,
-                      }),
-                      ...(variant.stock !== undefined && {
-                        stock: variant.stock,
-                      }),
-                      ...(variant.sku !== undefined && { sku: variant.sku }),
-                    },
-                  })
-                : Promise.resolve(),
-            ),
-          );
-        }
-
-        // Upsert variants by checking if SKU exists - in parallel
-        if (variantsToUpsert.length > 0) {
-          const upsertPromises = variantsToUpsert.map((variant) => {
-            if (variant.sku && variant.price !== undefined) {
-              const existingId = existingVariantMap.get(variant.sku);
-              if (existingId) {
-                return tx.productVariant.update({
-                  where: { id: existingId },
-                  data: { price: variant.price, stock: variant.stock ?? 0 },
-                });
-              } else {
-                return tx.productVariant.create({
-                  data: {
-                    productId: id,
-                    sku: variant.sku,
-                    price: variant.price,
-                    stock: variant.stock ?? 0,
-                    isActive: true,
-                    isDeleted: false,
-                  },
-                });
-              }
-            }
-            return Promise.resolve();
-          });
-
-          await Promise.all(upsertPromises);
-        }
+        await Promise.all(upsertPromises);
       }
+    }
 
-      // Finally update the product basic fields
-      return tx.product.update({
-        where: { id },
-        data: updateData,
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          description: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-          category: { select: { id: true, name: true, slug: true } },
-          variants: {
-            where: { isDeleted: false },
-            select: {
-              id: true,
-              sku: true,
-              price: true,
-              stock: true,
-              isActive: true,
-            },
-          },
-          images: {
-            select: { id: true, url: true, altText: true, position: true },
+    // Finally update the product basic fields
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        category: { select: { id: true, name: true, slug: true } },
+        variants: {
+          where: { isDeleted: false },
+          select: {
+            id: true,
+            sku: true,
+            price: true,
+            stock: true,
+            isActive: true,
           },
         },
-      });
+        images: {
+          select: { id: true, url: true, altText: true, position: true },
+        },
+      },
     });
 
     return { message: 'Product updated successfully', data: product };

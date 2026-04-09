@@ -25,6 +25,24 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsString()
   sku?: string;
+
+  /**
+   * For creating new variants with attributes
+   * Array of { attributeId, valueId } for variant attributes
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantAttributeDto)
+  attributes?: VariantAttributeDto[];
+}
+
+export class VariantAttributeDto {
+  @IsNumber()
+  attributeId!: number;
+
+  @IsNumber()
+  valueId!: number;
 }
 
 export class UpdateProductImageDto {
