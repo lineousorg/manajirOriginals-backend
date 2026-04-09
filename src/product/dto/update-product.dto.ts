@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   IsBoolean,
   IsNumber,
@@ -69,8 +70,8 @@ export class UpdateProductDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ProductVariantUpdateDto)
-  variants?: ProductVariantUpdateDto[];
+  @Type(() => UpdateProductVariantDto)
+  variants?: UpdateProductVariantDto[];
 
   @IsOptional()
   @IsArray()

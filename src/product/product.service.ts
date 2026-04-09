@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockReservationService } from '../stock-reservation/stock-reservation.service';
