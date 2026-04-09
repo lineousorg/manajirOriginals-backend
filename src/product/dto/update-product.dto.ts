@@ -8,12 +8,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-/**
- * For updating or creating variants in product update:
- * - WITH id: Update existing variant (only mutable fields)
- * - WITHOUT id: Create new variant (required fields)
- */
-export class ProductVariantUpdateDto {
+export class UpdateProductVariantDto {
   @IsOptional()
   @IsNumber()
   id?: number;
@@ -29,14 +24,6 @@ export class ProductVariantUpdateDto {
   @IsOptional()
   @IsString()
   sku?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  isDeleted?: boolean;
 }
 
 export class UpdateProductImageDto {
