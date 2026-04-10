@@ -181,29 +181,7 @@ export class OrderService {
       }
 
       // Issue #3: For items WITHOUT reservation: use atomic update inside transaction
-      for (const item of itemsWithoutReservation) {
-        const variant = variants.find((v) => v.id === item.variantId);
-        if (!variant) continue;
 
-        // Atomic update: only succeeds if stock is sufficient
-        const result = await tx.productVariant.updateMany({
-          where: {
-            id: item.variantId,
-            stock: { gte: item.quantity },
-          },
-          data: { stock: { decrement: item.quantity } },
-        });
-
-        if (result.count === 0) {
-          const currentVariant = await tx.productVariant.findUnique({
-            where: { id: item.variantId },
-            select: { stock: true, sku: true },
-          });
-          throw new BadRequestException(
-            `Insufficient stock for variant ${currentVariant?.sku || item.variantId}. Available: ${currentVariant?.stock || 0}, Requested: ${item.quantity}`,
-          );
-        }
-      }
 
       // Create the order
       return tx.order.create({
