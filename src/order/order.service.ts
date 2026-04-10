@@ -45,7 +45,7 @@ function generateInvoiceNumber(productId: number): string {
 
 @Injectable()
 export class OrderService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   /**
    * Create a new order
