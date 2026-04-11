@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateGuestOrderDto } from './dto/create-guest-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order, OrderStatus, Role, DeliveryType } from '@prisma/client';
 import PDFDocument from 'pdfkit';
@@ -18,6 +19,7 @@ import {
   PaginatedResponse,
   createPaginatedResponse,
 } from '../common/dto/pagination.dto';
+import { GuestUserService } from '../guest-user/guest-user.service';
 
 /**
  * Generate order number: yyyymmddproductid
@@ -45,7 +47,10 @@ function generateInvoiceNumber(productId: number): string {
 
 @Injectable()
 export class OrderService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private guestUserService: GuestUserService,
+  ) { }
 
   /**
    * Create a new order
@@ -119,9 +124,6 @@ export class OrderService {
       // Separate items with reservations from those without
       const itemsWithReservation = dto.items.filter(
         (item) => item.reservationId,
-      );
-      const itemsWithoutReservation = dto.items.filter(
-        (item) => !item.reservationId,
       );
 
       // Issue #4 & #5: For items WITH reservation: validate ownership, expiration, and status
@@ -203,6 +205,7 @@ export class OrderService {
           orderNumber: true,
           invoiceNumber: true,
           userId: true,
+          guestUserId: true,
           addressId: true,
           status: true,
           paymentMethod: true,
@@ -214,6 +217,14 @@ export class OrderService {
           user: {
             select: {
               id: true,
+              email: true,
+            },
+          },
+          guestUser: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
               email: true,
             },
           },
@@ -258,6 +269,248 @@ export class OrderService {
       message: 'Order created successfully',
       status: 'success',
       data: order,
+    };
+  }
+
+  /**
+   * Create a new order as guest (without authentication)
+   * Security: No JWT required, anyone can create a guest order
+   * Uses same logic as authenticated order but with guestUserId instead of userId
+   */
+  async createGuest(
+    dto: CreateGuestOrderDto,
+  ): Promise<{
+    message: string;
+    status: string;
+    data: Order;
+  }> {
+    // Validate all variants exist
+    const variantIds = dto.items.map((item) => item.variantId);
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: variantIds } },
+      include: { product: true },
+    });
+
+    if (variants.length !== variantIds.length) {
+      throw new NotFoundException('One or more product variants not found');
+    }
+
+    // Calculate total and create order items (outside transaction - just for pricing)
+    let total = 0;
+    const orderItemsData = dto.items.map((item) => {
+      const variant = variants.find((v) => v.id === item.variantId)!;
+      const itemTotal = Number(variant.price) * item.quantity;
+      total += itemTotal;
+
+      return {
+        variantId: item.variantId,
+        quantity: item.quantity,
+        price: variant.price,
+        reservationId: item.reservationId || null,
+      };
+    });
+
+    // Calculate delivery charge
+    const deliveryType = dto.deliveryType || DeliveryType.INSIDE_DHAKA;
+    const deliveryCharge =
+      deliveryType === DeliveryType.INSIDE_DHAKA ? 70 : 150;
+    total += deliveryCharge;
+
+    // Get primary product ID for order/invoice number generation
+    const primaryProductId = variants[0]?.product?.id || 1;
+
+    // Generate order and invoice numbers
+    let orderNumber = generateOrderNumber(primaryProductId);
+    let invoiceNumber = generateInvoiceNumber(primaryProductId);
+
+    // Check for duplicates
+    const existingOrder = await this.prisma.order.findFirst({
+      where: { OR: [{ orderNumber }, { invoiceNumber }] },
+    });
+
+    if (existingOrder) {
+      const count = await this.prisma.order.count({
+        where: {
+          orderNumber: { startsWith: orderNumber },
+        },
+      });
+      orderNumber = `${orderNumber}-${count + 1}`;
+      invoiceNumber = `${invoiceNumber}-${count + 1}`;
+    }
+
+    // Find or create guest user
+    const guestUser = await this.guestUserService.findOrCreate({
+      name: dto.name,
+      phone: dto.phone,
+      email: dto.email,
+      address: dto.address,
+      city: dto.city,
+      postalCode: dto.postalCode,
+    });
+
+    // Create order in a transaction to ensure data consistency
+    const order = await this.prisma.$transaction(async (tx) => {
+      // For items without reservation: decrement stock using atomic update
+      const itemsWithoutReservation = dto.items.filter(
+        (item) => !item.reservationId,
+      );
+
+      for (const item of itemsWithoutReservation) {
+        const updatedVariant = await tx.productVariant.update({
+          where: { id: item.variantId },
+          data: {
+            stock: { decrement: item.quantity },
+          },
+        });
+
+        if (updatedVariant.stock < 0) {
+          throw new BadRequestException(
+            `Insufficient stock for variant ${item.variantId}`,
+          );
+        }
+      }
+
+      // Create the order
+      return tx.order.create({
+        data: {
+          orderNumber,
+          invoiceNumber,
+          userId: null, // No authenticated user
+          guestUserId: guestUser.id, // Link to guest user
+          paymentMethod: dto.paymentMethod || 'CASH_ON_DELIVERY',
+          total,
+          addressId: null, // No saved address for guests
+          deliveryType,
+          deliveryCharge,
+          items: {
+            create: orderItemsData,
+          },
+        },
+        select: {
+          id: true,
+          orderNumber: true,
+          invoiceNumber: true,
+          userId: true,
+          guestUserId: true,
+          addressId: true,
+          status: true,
+          paymentMethod: true,
+          total: true,
+          deliveryType: true,
+          deliveryCharge: true,
+          createdAt: true,
+          updatedAt: true,
+          guestUser: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              email: true,
+            },
+          },
+          items: {
+            select: {
+              id: true,
+              quantity: true,
+              price: true,
+              variant: {
+                select: {
+                  id: true,
+                  sku: true,
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      slug: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    return {
+      message: 'Order placed successfully',
+      status: 'success',
+      data: order,
+    };
+  }
+
+  /**
+   * Track guest orders by phone number
+   * Security: No authentication required, anyone can track with phone number
+   */
+  async trackGuestOrder(phone: string): Promise<{
+    message: string;
+    status: string;
+    data: any[];
+  }> {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        guestUser: {
+          phone: phone,
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        invoiceNumber: true,
+        status: true,
+        paymentMethod: true,
+        total: true,
+        deliveryType: true,
+        deliveryCharge: true,
+        createdAt: true,
+        guestUser: {
+          select: {
+            name: true,
+            phone: true,
+            email: true,
+            address: true,
+            city: true,
+          },
+        },
+        items: {
+          select: {
+            id: true,
+            quantity: true,
+            price: true,
+            variant: {
+              select: {
+                id: true,
+                sku: true,
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (orders.length === 0) {
+      return {
+        message: 'No orders found for this phone number',
+        status: 'success',
+        data: [],
+      };
+    }
+
+    return {
+      message: 'Orders retrieved successfully',
+      status: 'success',
+      data: orders,
     };
   }
 
@@ -407,6 +660,7 @@ export class OrderService {
         orderNumber: true,
         invoiceNumber: true,
         userId: true,
+        guestUserId: true,
         addressId: true,
         status: true,
         paymentMethod: true,
@@ -419,6 +673,14 @@ export class OrderService {
           select: {
             id: true,
             email: true,
+          },
+        },
+        guestUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
           },
         },
         address: {
@@ -492,7 +754,8 @@ export class OrderService {
     }
 
     // Security: Check if user owns this order or is admin
-    if (userRole !== Role.ADMIN && order.userId !== userId) {
+    // For guest orders, only admins can view
+    if (userRole !== Role.ADMIN && order.userId !== userId && !order.guestUserId) {
       throw new ForbiddenException(
         'You do not have permission to view this order',
       );
@@ -612,6 +875,7 @@ export class OrderService {
       select: {
         id: true,
         userId: true,
+        guestUserId: true,
         orderNumber: true,
         invoiceNumber: true,
         status: true,
@@ -624,6 +888,14 @@ export class OrderService {
           select: {
             id: true,
             email: true,
+          },
+        },
+        guestUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
           },
         },
         address: true,
@@ -659,7 +931,8 @@ export class OrderService {
     }
 
     // Security: Check if user owns this order or is admin
-    if (userRole !== Role.ADMIN && order.userId !== userId) {
+    // For guest orders, only admins can view receipts
+    if (userRole !== Role.ADMIN && order.userId !== userId && !order.guestUserId) {
       throw new ForbiddenException(
         'You do not have permission to view this order',
       );
@@ -851,21 +1124,32 @@ export class OrderService {
       doc.text('Customer ID:', 50, yPos + 42);
 
       doc.fillColor('#000000');
-      // Truncate long emails to fit
-      const email = order.user.email;
-      const emailWidth = doc.widthOfString(email);
-      let displayEmail = email;
-      if (emailWidth > 180) {
-        while (
-          doc.widthOfString(displayEmail + '...') > 180 &&
-          displayEmail.length > 5
-        ) {
-          displayEmail = displayEmail.slice(0, -1);
+      // Handle both authenticated users and guest users
+      if (order.user) {
+        const email = order.user.email;
+        const emailWidth = doc.widthOfString(email);
+        let displayEmail = email;
+        if (emailWidth > 180) {
+          while (
+            doc.widthOfString(displayEmail + '...') > 180 &&
+            displayEmail.length > 5
+          ) {
+            displayEmail = displayEmail.slice(0, -1);
+          }
+          if (displayEmail !== email) displayEmail += '...';
         }
-        if (displayEmail !== email) displayEmail += '...';
+        doc.text(displayEmail, 80, yPos + 26, { width: 200 });
+        doc.text(`#${order.user.id}`, 105, yPos + 42);
+      } else if (order.guestUser) {
+        // Guest user - show their info
+        const guestEmail = order.guestUser.email || 'N/A';
+        const guestName = order.guestUser.name;
+        doc.text(guestEmail, 80, yPos + 26, { width: 200 });
+        doc.text(`Guest: ${guestName}`, 80, yPos + 42, { width: 200 });
+      } else {
+        doc.text('N/A', 80, yPos + 26);
+        doc.text('N/A', 105, yPos + 42);
       }
-      doc.text(displayEmail, 80, yPos + 26, { width: 200 });
-      doc.text(`#${order.user.id}`, 105, yPos + 42);
 
       // Shipping Address Box
       const shipX = 308;

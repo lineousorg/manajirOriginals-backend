@@ -255,8 +255,13 @@ model Order {
   // Note: Application handles uniqueness, not DB constraint
   invoiceNumber String?
   
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
+  // For authenticated users
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id])
+
+  // For guest users
+  guestUserId Int?
+  guestUser   GuestUser? @relation(fields: [guestUserId], references: [id])
 
   addressId Int?
   address   Address? @relation(fields: [addressId], references: [id])
@@ -318,4 +323,26 @@ model StockReservation {
   @@index([userId, status])
   @@index([variantId, status])
   @@index([expiresAt])
+}
+
+/**
+ * ============================
+ * GUEST USERS
+ * ============================
+ */
+
+model GuestUser {
+  id         Int      @id @default(autoincrement())
+  name       String
+  phone      String   @unique
+  email      String?
+  address    String
+  city       String?
+  postalCode String?
+  country    String   @default("Bangladesh")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[]
 }

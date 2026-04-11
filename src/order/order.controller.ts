@@ -14,6 +14,7 @@ import {
 import { Response } from 'express';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateGuestOrderDto } from './dto/create-guest-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
@@ -38,12 +39,29 @@ export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
   /**
-   * Create a new order
-   * Access: Authenticated customers and admins
+   * Create a new order (authenticated users only)
    */
   @Post()
   create(@Request() req: RequestWithUser, @Body() dto: CreateOrderDto) {
     return this.orderService.create(req.user.id, dto);
+  }
+
+  /**
+   * Create a new order as guest (no authentication required)
+   * Access: Anyone can create a guest order
+   */
+  @Post('guest')
+  createGuest(@Body() dto: CreateGuestOrderDto) {
+    return this.orderService.createGuest(dto);
+  }
+
+  /**
+   * Track guest orders by phone number (no authentication required)
+   * Access: Anyone can track orders by providing phone number
+   */
+  @Get('guest/track')
+  trackGuestOrder(@Query('phone') phone: string) {
+    return this.orderService.trackGuestOrder(phone);
   }
 
   /**
