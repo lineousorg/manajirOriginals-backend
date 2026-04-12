@@ -14,6 +14,7 @@ import { CreateGuestOrderDto } from './dto/create-guest-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order, OrderStatus, Role, DeliveryType } from '@prisma/client';
 import PDFDocument from 'pdfkit';
+import axios from 'axios';
 import {
   PaginationQueryDto,
   PaginatedResponse,
@@ -51,6 +52,43 @@ export class OrderService {
     private prisma: PrismaService,
     private guestUserService: GuestUserService,
   ) { }
+
+  /**
+   * Validate reCAPTCHA token with Google
+   */
+  private async validateRecaptcha(token: string): Promise<boolean> {
+    if (!token) {
+      return true; // Skip validation if no token
+    }
+
+    const secretKey = process.env.RECAPTCHA_SECRET_KEY;
+    if (!secretKey) {
+      console.warn('RECAPTCHA_SECRET_KEY not configured, skipping validation');
+      return true;
+    }
+
+    try {
+      const response = await axios.post(
+        'https://www.google.com/recaptcha/api/siteverify',
+        null,
+        {
+          params: {
+            secret: secretKey,
+            response: token,
+          },
+        },
+      );
+
+      if (!response.data.success) {
+        throw new BadRequestException('reCAPTCHA validation failed');
+      }
+
+      return true;
+    } catch (error: any) {
+      console.error('reCAPTCHA validation error:', error.message);
+      throw new BadRequestException('reCAPTCHA validation error');
+    }
+  }
 
   /**
    * Create a new order
@@ -284,6 +322,11 @@ export class OrderService {
     status: string;
     data: Order;
   }> {
+    // Validate reCAPTCHA token if provided
+    if (dto.recaptchaToken) {
+      await this.validateRecaptcha(dto.recaptchaToken);
+    }
+
     // Validate all variants exist
     const variantIds = dto.items.map((item) => item.variantId);
     const variants = await this.prisma.productVariant.findMany({

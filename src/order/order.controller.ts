@@ -34,7 +34,6 @@ interface RequestWithUser extends Request {
 }
 
 @Controller('orders')
-@UseGuards(JwtAuthGuard)
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
@@ -42,6 +41,7 @@ export class OrderController {
    * Create a new order (authenticated users only)
    */
   @Post()
+  @UseGuards(JwtAuthGuard)
   create(@Request() req: RequestWithUser, @Body() dto: CreateOrderDto) {
     return this.orderService.create(req.user.id, dto);
   }
@@ -69,6 +69,7 @@ export class OrderController {
    * Access: Admins see all orders, customers see only their own
    */
   @Get()
+  @UseGuards(JwtAuthGuard)
   findAll(
     @Request() req: RequestWithUser,
     @Query() pagination: PaginationQueryDto,
@@ -81,6 +82,7 @@ export class OrderController {
    * Access: Admins can view any order, customers can view only their own
    */
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
   findOne(
     @Param('id', ParseIntPipe) id: number,
     @Request() req: RequestWithUser,

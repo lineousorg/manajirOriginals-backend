@@ -8,6 +8,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -21,6 +22,17 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Role } from '@prisma/client';
 
+/**
+ * Extended request with optional user from JWT
+ */
+interface RequestWithUser extends Request {
+  user?: {
+    id: number;
+    email: string;
+    role: Role;
+  };
+}
+
 @Controller('stock-reservation')
 export class StockReservationController {
   constructor(
@@ -30,39 +42,56 @@ export class StockReservationController {
   /**
    * Reserve stock for a variant
    * POST /stock-reservation/reserve
+   * Access: Public - works for both authenticated users and guest users
+   * For guests, provide guestPhone in the request body
    */
-  @UseGuards(JwtAuthGuard)
   @Post('reserve')
-  async reserveStock(@Request() req, @Body() dto: ReserveStockDto) {
+  async reserveStock(
+    @Request() req: RequestWithUser,
+    @Body() dto: ReserveStockDto,
+  ) {
+    const userId = req.user?.id ?? null;
     return this.stockReservationService.reserveStock(
-      req.user.id,
+      userId,
       dto.variantId,
       dto.quantity,
       dto.expirationMinutes,
+      dto.guestPhone,
     );
   }
 
   /**
    * Release a reservation
    * POST /stock-reservation/release
+   * Access: Public - works for both authenticated users and guest users
+   * For guests, provide guestPhone in the request body
    */
-  @UseGuards(JwtAuthGuard)
   @Post('release')
-  async releaseReservation(@Request() req, @Body() dto: ReleaseReservationDto) {
+  async releaseReservation(
+    @Request() req: RequestWithUser,
+    @Body() dto: ReleaseReservationDto,
+  ) {
+    const userId = req.user?.id ?? null;
     return this.stockReservationService.releaseReservation(
       dto.reservationId,
-      req.user.id,
+      userId,
+      dto.guestPhone,
     );
   }
 
   /**
    * Get active reservations for the current user
    * GET /stock-reservation/my-reservations
+   * Access: Public - works for both authenticated users and guest users
+   * For guests, provide guestPhone as query parameter
    */
-  @UseGuards(JwtAuthGuard)
   @Get('my-reservations')
-  async getMyReservations(@Request() req) {
-    return this.stockReservationService.getUserReservations(req.user.id);
+  async getMyReservations(
+    @Request() req: RequestWithUser,
+    @Query('guestPhone') guestPhone?: string,
+  ) {
+    const userId = req.user?.id ?? null;
+    return this.stockReservationService.getUserReservations(userId, guestPhone);
   }
 
   /**

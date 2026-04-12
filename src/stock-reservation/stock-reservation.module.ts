@@ -4,9 +4,10 @@ import { StockReservationService } from './stock-reservation.service';
 import { StockReservationController } from './stock-reservation.controller';
 import { StockReservationScheduler } from './stock-reservation.scheduler';
 import { PrismaModule } from '../prisma/prisma.module';
+import { GuestUserModule } from '../guest-user/guest-user.module';
 
 @Module({
-  imports: [PrismaModule, ScheduleModule],
+  imports: [PrismaModule, GuestUserModule, ScheduleModule],
   controllers: [StockReservationController],
   providers: [StockReservationService, StockReservationScheduler],
   exports: [StockReservationService],

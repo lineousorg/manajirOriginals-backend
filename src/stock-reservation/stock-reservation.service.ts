@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Injectable,
   NotFoundException,
@@ -5,28 +7,50 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { GuestUserService } from '../guest-user/guest-user.service';
 
 // Default reservation expiration time in minutes
 export const DEFAULT_RESERVATION_MINUTES = 15;
 
 @Injectable()
 export class StockReservationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private guestUserService: GuestUserService,
+  ) {}
 
   /**
    * Reserve stock for a user
    * Creates a reservation and decrements actual stock
    * Uses atomic update to prevent race conditions
+   * For guest users, provide guestPhone to find or create a guest user
    */
   async reserveStock(
-    userId: number,
+    userId: number | null,
     variantId: number,
     quantity: number,
     expirationMinutes: number = DEFAULT_RESERVATION_MINUTES,
+    guestPhone?: string,
   ) {
     // Validate quantity
     if (quantity <= 0) {
       throw new BadRequestException('Quantity must be greater than 0');
+    }
+
+    // For guest users, find or create guest user account
+    let effectiveUserId = userId;
+    if (!userId && guestPhone) {
+      const guestUser = await this.guestUserService.findOrCreate({
+        name: 'Guest',
+        phone: guestPhone,
+        address: '',
+      });
+      effectiveUserId = guestUser.id;
+    }
+
+    // Allow anonymous reservations - no user ID or phone required
+    if (!effectiveUserId) {
+      effectiveUserId = -1; // Negative ID indicates anonymous reservation
     }
 
     // Calculate expiration time
@@ -95,7 +119,7 @@ export class StockReservationService {
       // Create the reservation
       const reservation = await tx.stockReservation.create({
         data: {
-          userId,
+          userId: effectiveUserId,
           variantId,
           quantity,
           status: 'ACTIVE',
@@ -131,16 +155,44 @@ export class StockReservationService {
   /**
    * Release a reservation (when user removes from cart or manually releases)
    * Restores the stock back to the variant
+   * For guest users, provide guestPhone to find the guest user
+   * Public API - no authentication required
    */
-  async releaseReservation(reservationId: number, userId: number) {
+  async releaseReservation(
+    reservationId: number,
+    userId: number | null,
+    guestPhone?: string,
+  ) {
+    // For guest users, find the guest user account
+    let effectiveUserId = userId;
+    if (!userId && guestPhone) {
+      const guestUser = await this.guestUserService.findByPhone(guestPhone);
+      if (!guestUser) {
+        throw new NotFoundException(
+          'Guest user not found. Please provide a valid phone number.',
+        );
+      }
+      effectiveUserId = guestUser.id;
+    }
+
+    // Allow releasing by reservationId alone for anonymous users
+    // If no userId and no guestPhone, we'll try to find by reservationId only
+
     // Use transaction to ensure atomicity
     const result = await this.prisma.$transaction(async (tx) => {
+      // Build the query based on whether we have a userId or not
+      const query: any = {
+        id: reservationId,
+        status: 'ACTIVE' as const,
+      };
+
+      // Only add userId filter if we have a valid userId (not null and not -1 for anonymous)
+      if (effectiveUserId && effectiveUserId > 0) {
+        query.userId = effectiveUserId;
+      }
+
       const reservation = await tx.stockReservation.findFirst({
-        where: {
-          id: reservationId,
-          userId,
-          status: 'ACTIVE',
-        },
+        where: query,
       });
 
       if (!reservation) {
@@ -234,12 +286,30 @@ export class StockReservationService {
   }
 
   /**
-   * Get active reservations for a user
+   * Get active reservations for a user or guest
+   * For guest users, provide guestPhone to find the guest user
    */
-  async getUserReservations(userId: number) {
+  async getUserReservations(userId: number | null, guestPhone?: string) {
+    // For guest users, find the guest user account
+    let effectiveUserId = userId;
+    if (!userId && guestPhone) {
+      const guestUser = await this.guestUserService.findByPhone(guestPhone);
+      if (guestUser) {
+        effectiveUserId = guestUser.id;
+      }
+    }
+
+    if (!effectiveUserId) {
+      return {
+        message: 'No active reservations',
+        status: 'success',
+        data: [],
+      };
+    }
+
     const reservations = await this.prisma.stockReservation.findMany({
       where: {
-        userId,
+        userId: effectiveUserId,
         status: 'ACTIVE',
         expiresAt: { gt: new Date() },
       },

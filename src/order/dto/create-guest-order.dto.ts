@@ -79,4 +79,12 @@ export class CreateGuestOrderDto extends GuestContactDto {
   @IsEnum(DeliveryType)
   @IsOptional()
   deliveryType?: DeliveryType = DeliveryType.INSIDE_DHAKA;
+
+  /**
+   * reCAPTCHA token for bot protection
+   * Optional - will be validated if provided
+   */
+  @IsOptional()
+  @IsString()
+  recaptchaToken?: string;
 }

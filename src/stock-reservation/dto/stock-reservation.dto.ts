@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, Min } from 'class-validator';
+import { IsNumber, IsOptional, Min, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ReserveStockDto {
@@ -16,12 +16,27 @@ export class ReserveStockDto {
   @Min(1)
   @Type(() => Number)
   expirationMinutes?: number;
+
+  /**
+   * Guest phone number - used for guest users to identify themselves
+   * If provided, the reservation will be associated with a guest user account
+   */
+  @IsOptional()
+  @IsString()
+  guestPhone?: string;
 }
 
 export class ReleaseReservationDto {
   @IsNumber()
   @Type(() => Number)
   reservationId!: number;
+
+  /**
+   * Guest phone number - used for guest users to release their reservations
+   */
+  @IsOptional()
+  @IsString()
+  guestPhone?: string;
 }
 
 export class CheckAvailabilityDto {
