@@ -597,6 +597,14 @@ export class OrderService {
             _count: {
               select: { items: true },
             },
+            guestUser: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+              },
+            },
           },
         }),
         this.prisma.order.count(),
@@ -646,6 +654,14 @@ export class OrderService {
                 postalCode: true,
                 country: true,
                 isDefault: true,
+              },
+            },
+            guestUser: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
               },
             },
             items: {
@@ -1185,8 +1201,8 @@ export class OrderService {
         doc.text(`#${order.user.id}`, 105, yPos + 42);
       } else if (order.guestUser) {
         // Guest user - show their info
-        const guestEmail = order.guestUser.email || 'N/A';
-        const guestName = order.guestUser.name;
+        const guestEmail = order.guestUser?.email || 'N/A';
+        const guestName = order.guestUser?.name || 'Guest';
         doc.text(guestEmail, 80, yPos + 26, { width: 200 });
         doc.text(`Guest: ${guestName}`, 80, yPos + 42, { width: 200 });
       } else {

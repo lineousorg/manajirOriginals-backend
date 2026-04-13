@@ -15,6 +15,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { FileModule } from './common/file.module';
 import { StockReservationModule } from './stock-reservation/stock-reservation.module';
+import { GuestUserModule } from './guest-user/guest-user.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { StockReservationModule } from './stock-reservation/stock-reservation.mo
     AttributeValueModule,
     FileModule,
     StockReservationModule,
+    GuestUserModule,
   ],
   controllers: [AppController],
   providers: [AppService],

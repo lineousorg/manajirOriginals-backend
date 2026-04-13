@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GuestUser } from '@prisma/client';
@@ -70,5 +67,23 @@ export class GuestUserService {
     return await this.prisma.guestUser.findUnique({
       where: { id },
     });
+  }
+
+  /**
+   * Find all guest users with pagination
+   */
+  async findAll(options: { skip: number; take: number }): Promise<GuestUser[]> {
+    return await this.prisma.guestUser.findMany({
+      skip: options.skip,
+      take: options.take,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Count total guest users
+   */
+  async count(): Promise<number> {
+    return await this.prisma.guestUser.count();
   }
 }
