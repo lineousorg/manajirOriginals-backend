@@ -179,6 +179,7 @@ export class OrderService {
 
         // Issue #5: Validate reservation ownership
         if (reservation.userId !== userId) {
+          console.log(reservation.userId, userId);
           throw new BadRequestException(
             `Reservation ${item.reservationId} does not belong to this user`,
           );
@@ -921,12 +922,13 @@ export class OrderService {
 
   /**
    * Generate a PDF receipt for an order
-   * Security: Customers can only generate receipts for their own orders
+   * Security: Anyone can download if they own the order (authenticated) or have the phone (guest)
    */
   async generateReceipt(
     id: number,
-    userId: number,
-    userRole: Role,
+    userId: number | undefined,
+    userRole: Role | undefined,
+    phone?: string,
   ): Promise<Buffer> {
     // Fetch order with all details including address
     const order = await this.prisma.order.findUnique({
@@ -990,8 +992,21 @@ export class OrderService {
     }
 
     // Security: Check if user owns this order or is admin
-    // For guest orders, only admins can view receipts
-    if (userRole !== Role.ADMIN && order.userId !== userId && !order.guestUserId) {
+    // For guest orders, allow if phone matches the guest user's phone
+    const isAdmin = userRole === Role.ADMIN;
+    const isOwner = order.userId === userId;
+    // Only check guest ownership if phone is provided and not empty
+    const phoneValue = phone && phone.trim() ? phone.trim() : undefined;
+    const isGuestOwner = order.guestUserId && phoneValue
+      ? await this.prisma.guestUser.findFirst({
+          where: {
+            id: order.guestUserId,
+            phone: phoneValue,
+          },
+        })
+      : false;
+
+    if (!isAdmin && !isOwner && !isGuestOwner) {
       throw new ForbiddenException(
         'You do not have permission to view this order',
       );

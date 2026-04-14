@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Get,
@@ -17,6 +19,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateGuestOrderDto } from './dto/create-guest-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from 'src/auth/optional-jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { Role } from '@prisma/client';
@@ -107,18 +110,25 @@ export class OrderController {
 
   /**
    * Download order receipt as PDF
-   * Access: Admins can download any order, customers can download only their own
+   * Access: Public - Anyone can download if they own the order (authenticated user) or have the phone number (guest)
    */
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id/receipt')
   async downloadReceipt(
     @Param('id', ParseIntPipe) id: number,
-    @Request() req: RequestWithUser,
+    @Query('phone') phone: string | undefined,
+    @Request() req: Request,
     @Res() res: Response,
   ) {
+    const user = (req as any).user;
+    const userId = user?.id;
+    const userRole = user?.role;
+
     const receiptBuffer = await this.orderService.generateReceipt(
       id,
-      req.user.id,
-      req.user.role,
+      userId,
+      userRole,
+      phone,
     );
 
     res.set({

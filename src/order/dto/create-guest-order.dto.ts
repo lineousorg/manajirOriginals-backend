@@ -8,7 +8,6 @@ import {
   Min,
   ArrayMinSize,
   ValidateNested,
-  IsEmail,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod, DeliveryType } from '@prisma/client';
@@ -44,7 +43,6 @@ export class GuestContactDto {
   @IsNotEmpty()
   phone!: string;
 
-  @IsEmail()
   @IsOptional()
   email?: string;
 

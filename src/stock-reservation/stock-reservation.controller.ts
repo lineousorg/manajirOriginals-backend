@@ -18,6 +18,7 @@ import {
   CheckAvailabilityDto,
 } from './dto/stock-reservation.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Role } from '@prisma/client';
 
@@ -44,6 +45,7 @@ export class StockReservationController {
    * Access: Public - works for both authenticated users and guest users
    * For guests, provide guestPhone in the request body
    */
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('reserve')
   async reserveStock(
     @Request() req: RequestWithUser,
@@ -65,6 +67,7 @@ export class StockReservationController {
    * Access: Public - works for both authenticated users and guest users
    * For guests, provide guestPhone in the request body
    */
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('release')
   async releaseReservation(
     @Request() req: RequestWithUser,
