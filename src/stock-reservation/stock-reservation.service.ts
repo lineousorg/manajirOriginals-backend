@@ -379,6 +379,64 @@ export class StockReservationService {
   }
 
   /**
+   * Batch get available stock for multiple variants (optimized for N+1 queries)
+   * Returns stock info for all variants in ONE query
+   */
+  async getAvailableStockBulk(variantIds: number[]) {
+    if (variantIds.length === 0) {
+      return [];
+    }
+
+    // Get all variants in one query
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: variantIds } },
+      select: { id: true, stock: true },
+    });
+
+    // Get all active reservations for these variants in one query
+    const reservations = await this.prisma.stockReservation.groupBy({
+      by: ['variantId'],
+      where: {
+        variantId: { in: variantIds },
+        status: 'ACTIVE',
+        expiresAt: { gt: new Date() },
+      },
+      _sum: {
+        quantity: true,
+      },
+    });
+
+    // Create a map for quick lookup
+    const reservationMap = new Map<number, number>();
+    reservations.forEach((r) => {
+      reservationMap.set(r.variantId, r._sum.quantity || 0);
+    });
+
+    // Build result for each variant
+    const variantMap = new Map(variants.map((v) => [v.id, v]));
+
+    return variantIds
+      .map((id) => {
+        const variant = variantMap.get(id);
+        if (!variant) return null;
+
+        // Stock is already decremented at reservation time
+        // variant.stock represents available stock (source of truth)
+        // activeReservationQuantity is for reporting Purposes Only
+        const activeReservationQuantity = reservationMap.get(id) || 0;
+        const availableStock = variant.stock;
+
+        return {
+          variantId: id,
+          totalStock: variant.stock,
+          activeReservationQuantity: activeReservationQuantity, // For reporting only - NOT used in availability math
+          availableStock: Math.max(0, availableStock),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }
+
+  /**
    * Check if stock is available for a given quantity
    */
   async checkAvailability(variantId: number, quantity: number) {

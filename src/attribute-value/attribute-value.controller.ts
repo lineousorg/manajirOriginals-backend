@@ -6,7 +6,6 @@ import {
   Delete,
   Param,
   Body,
-  Query,
   ParseIntPipe,
 } from '@nestjs/common';
 import { AttributeValueService } from './attribute-value.service';
@@ -14,7 +13,6 @@ import {
   CreateAttributeValueDto,
   UpdateAttributeValueDto,
 } from './dto/create-attribute-value.dto';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Controller('attribute-values')
 export class AttributeValueController {
@@ -71,8 +69,8 @@ export class AttributeValueController {
    * }
    */
   @Get()
-  findAll(@Query() pagination: PaginationQueryDto) {
-    return this.attributeValueService.findAll(pagination);
+  findAll() {
+    return this.attributeValueService.findAll();
   }
 
   /**

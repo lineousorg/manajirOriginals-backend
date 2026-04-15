@@ -67,6 +67,10 @@ model Product {
   images      Image[]
   category    Category         @relation(fields: [categoryId], references: [id])
   variants    ProductVariant[]
+
+  @@index([isDeleted])
+  @@index([categoryId, isDeleted])
+  @@index([createdAt(sort: Desc)])
 }
 
 model ProductVariant {
@@ -85,6 +89,8 @@ model ProductVariant {
   product      Product            @relation(fields: [productId], references: [id])
   reservations StockReservation[]
   attributes   VariantAttribute[]
+
+  @@index([productId, isDeleted])
 }
 
 model Attribute {
@@ -176,6 +182,7 @@ model StockReservation {
   @@index([userId, status])
   @@index([variantId, status])
   @@index([expiresAt])
+  @@index([variantId, status, expiresAt])
 }
 
 model GuestUser {

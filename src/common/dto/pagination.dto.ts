@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsOptional, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsInt, Min, Max, IsBoolean } from 'class-validator';
 
 export class PaginationQueryDto {
   @IsOptional()
@@ -14,6 +14,16 @@ export class PaginationQueryDto {
   @Min(1)
   @Max(100)
   limit?: number = 10;
+
+  /**
+   * Whether to include stock info in the response.
+   * Set to false to skip the stock reservation query for better performance.
+   * Default: true (include stock info)
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  includeStock?: boolean = true;
 }
 
 export interface PaginatedResponse<T> {
