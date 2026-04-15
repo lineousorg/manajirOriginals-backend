@@ -153,8 +153,8 @@ model OrderItem {
   quantity      Int
   price         Decimal        @db.Decimal(10, 2)
   /// *
-  ///    * Optional reservation ID if this item was reserved before ordering
-  ///    * Helps track stock properly during order cancellation
+  /// * Optional reservation ID if this item was reserved before ordering
+  /// * Helps track stock properly during order cancellation
   reservationId Int?
   order         Order          @relation(fields: [orderId], references: [id])
   variant       ProductVariant @relation(fields: [variantId], references: [id])

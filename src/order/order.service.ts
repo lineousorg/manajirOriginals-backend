@@ -957,6 +957,10 @@ export class OrderService {
             name: true,
             email: true,
             phone: true,
+            address: true,
+            city: true,
+            postalCode: true,
+            country: true,
           },
         },
         address: true,
@@ -1265,6 +1269,47 @@ export class OrderService {
           order.address.city,
           order.address.postalCode,
           order.address.country,
+        ]
+          .filter(Boolean)
+          .filter(
+            (c) =>
+              c &&
+              c.toLowerCase() !== 'usa' &&
+              c.toLowerCase() !== 'united states',
+          )
+          .join(', ');
+
+        if (cityLine) {
+          doc.text(cityLine, shipX + 10, yPos + 76, { width: 220, height: 12 });
+        }
+      } else if (order.guestUser?.address) {
+        // Guest user address fallback
+        doc.fontSize(9).font('Helvetica');
+        doc.fillColor('#000000');
+
+        const guestName = order.guestUser?.name || 'Guest';
+        doc.text(guestName, shipX + 10, yPos + 24, { width: 220 });
+
+        doc.fillColor(secondaryColor);
+        doc.text('Phone:', shipX + 10, yPos + 38);
+        doc.fillColor('#000000');
+        doc.text(order.guestUser?.phone || 'N/A', shipX + 45, yPos + 38, { width: 190 });
+
+        doc.fillColor(secondaryColor);
+        doc.text('Address:', shipX + 10, yPos + 52);
+        doc.fillColor('#000000');
+
+        const addressText = order.guestUser?.address || '';
+        doc.text(addressText, shipX + 10, yPos + 66, {
+          width: 220,
+          height: 16,
+          lineBreak: true,
+        });
+
+        const cityLine = [
+          order.guestUser?.city,
+          order.guestUser?.postalCode,
+          order.guestUser?.country,
         ]
           .filter(Boolean)
           .filter(
