@@ -27,6 +27,61 @@ export class ProductService {
     private stockReservationService: StockReservationService,
   ) {}
 
+  /**
+   * Calculate variant pricing with discount validation
+   * Used for consistent price calculation across all endpoints
+   */
+  private calculateVariantPricing(variant: any, now: Date) {
+    const basePrice = Number(variant.price);
+    let finalPrice = basePrice;
+    let hasDiscount = false;
+    let discountAmount = 0;
+
+    // Pre-calc dates outside discount check
+    const discountStart = variant.discountStart
+      ? new Date(variant.discountStart)
+      : null;
+    const discountEnd = variant.discountEnd
+      ? new Date(variant.discountEnd)
+      : null;
+
+    // Validate discount values - must be > 0
+    const discountValue =
+      variant.discountValue && Number(variant.discountValue) > 0
+        ? Number(variant.discountValue)
+        : 0;
+
+    // Check if discount is active with proper validation
+    const isDiscountActive =
+      variant.discountType &&
+      discountValue > 0 &&
+      (!discountStart || now >= discountStart) &&
+      (!discountEnd || now <= discountEnd);
+
+    if (isDiscountActive) {
+      hasDiscount = true;
+
+      if (variant.discountType === 'PERCENTAGE') {
+        // Clamp percentage to max 100%
+        const clampedPercentage = Math.min(100, discountValue);
+        discountAmount = (basePrice * clampedPercentage) / 100;
+      } else if (variant.discountType === 'FIXED') {
+        // Clamp fixed discount to not exceed base price
+        discountAmount = Math.min(basePrice, discountValue);
+      }
+
+      finalPrice = Math.max(0, basePrice - discountAmount);
+    }
+
+    return {
+      basePrice,
+      finalPrice,
+      hasDiscount,
+      discountAmount,
+      discountType: hasDiscount ? variant.discountType : null,
+    };
+  }
+
   async create(dto: CreateProductDto) {
     // Check if slug already exists
     const existingProduct = await this.prisma.product.findUnique({
@@ -113,14 +168,16 @@ export class ProductService {
   async findAll(
     pagination: PaginationQueryDto,
   ): Promise<PaginatedResponse<any>> {
+    // findAll method
     const { page = 1, limit = 10, includeStock = true } = pagination;
     const skip = (page - 1) * limit;
 
-    // Fetch products with minimal data - variants just for price/stock calculation
+    // Fetch products with minimal data
     const [products, total] = await Promise.all([
       this.prisma.product.findMany({
         where: {
           isDeleted: false,
+          isActive: true,
         },
         skip,
         take: limit,
@@ -180,56 +237,44 @@ export class ProductService {
     const lightweightProducts = products.map((product) => {
       const now = new Date();
 
-      // Calculate prices with discount for each variant
+      // Calculate prices using helper method
       let minPrice = 0;
       let maxPrice = 0;
+      let minFinalPrice = 0;
       let hasDiscount = false;
-      let discountAmount = 0;
-      let discountPercentage = 0;
 
       if (product.variants.length > 0) {
+        const basePrices: number[] = [];
         const finalPrices: number[] = [];
+        let minBasePrice = Infinity;
+        let minBaseVariant: any = null;
 
         for (const variant of product.variants) {
-          const basePrice = Number(variant.price);
-          let finalPrice = basePrice;
-          let variantHasDiscount = false;
-          let variantDiscountAmount = 0;
+          const pricing = this.calculateVariantPricing(variant, now);
+          basePrices.push(pricing.basePrice);
+          finalPrices.push(pricing.finalPrice);
 
-          // Check if discount is active
-          const isDiscountActive =
-            variant.discountType &&
-            variant.discountValue &&
-            (!variant.discountStart ||
-              now >= new Date(variant.discountStart)) &&
-            (!variant.discountEnd || now <= new Date(variant.discountEnd));
-
-          if (isDiscountActive) {
-            variantHasDiscount = true;
-            const discountValue = Number(variant.discountValue);
-
-            if (variant.discountType === 'PERCENTAGE') {
-              variantDiscountAmount = (basePrice * discountValue) / 100;
-            } else if (variant.discountType === 'FIXED') {
-              variantDiscountAmount = discountValue;
-            }
-
-            finalPrice = Math.max(0, basePrice - variantDiscountAmount);
+          // Track variant with minimum base price for minFinalPrice
+          if (pricing.basePrice < minBasePrice) {
+            minBasePrice = pricing.basePrice;
+            minBaseVariant = variant;
           }
 
-          if (variantHasDiscount) {
+          if (pricing.hasDiscount) {
             hasDiscount = true;
-            discountAmount = variantDiscountAmount;
-            if (variant.discountType === 'PERCENTAGE') {
-              discountPercentage = Number(variant.discountValue);
-            }
           }
-
-          finalPrices.push(finalPrice);
         }
 
-        minPrice = Math.min(...finalPrices);
-        maxPrice = Math.max(...finalPrices);
+        minPrice = Math.min(...basePrices);
+        maxPrice = Math.max(...basePrices);
+
+        // Find the final price of the variant with minimum base price
+        if (minBaseVariant) {
+          const minPricing = this.calculateVariantPricing(minBaseVariant, now);
+          minFinalPrice = minPricing.finalPrice;
+        } else {
+          minFinalPrice = minPrice;
+        }
       }
 
       // Calculate available stock using pre-fetched data
@@ -256,8 +301,10 @@ export class ProductService {
         reservedStock: totalReservedStock,
         hasVariants: product.variants.length > 0,
         hasDiscount,
-        discountAmount,
-        discountPercentage,
+        discountAmount:
+          minFinalPrice > 0 && minFinalPrice < minPrice
+            ? minPrice - minFinalPrice
+            : 0,
       };
     });
 
@@ -277,6 +324,7 @@ export class ProductService {
     slug: string,
     query: CategoryProductsQueryDto,
   ): Promise<PaginatedResponse<any>> {
+    // findByCategory method
     const { page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
 
@@ -340,6 +388,10 @@ export class ProductService {
               id: true,
               price: true,
               stock: true,
+              discountType: true,
+              discountValue: true,
+              discountStart: true,
+              discountEnd: true,
             },
           },
           images: {
@@ -367,13 +419,53 @@ export class ProductService {
     const stockMap = new Map(stockInfo.map((s) => [s.variantId, s]));
 
     const lightweightProducts = products.map((product) => {
-      const prices = product.variants.map((v) => Number(v.price));
+      const now = new Date();
+
+      // Calculate prices using helper method
+      let minPrice = 0;
+      let maxPrice = 0;
+      let minFinalPrice = 0;
+      let hasDiscount = false;
+
+      if (product.variants.length > 0) {
+        const basePrices: number[] = [];
+        const finalPrices: number[] = [];
+        let minBasePrice = Infinity;
+        let minBaseVariant: any = null;
+
+        for (const variant of product.variants) {
+          const pricing = this.calculateVariantPricing(variant, now);
+          basePrices.push(pricing.basePrice);
+          finalPrices.push(pricing.finalPrice);
+
+          if (pricing.basePrice < minBasePrice) {
+            minBasePrice = pricing.basePrice;
+            minBaseVariant = variant;
+          }
+
+          if (pricing.hasDiscount) {
+            hasDiscount = true;
+          }
+        }
+
+        minPrice = Math.min(...basePrices);
+        maxPrice = Math.max(...basePrices);
+
+        if (minBaseVariant) {
+          const minPricing = this.calculateVariantPricing(minBaseVariant, now);
+          minFinalPrice = minPricing.finalPrice;
+        } else {
+          minFinalPrice = minPrice;
+        }
+      }
 
       // Calculate available stock using pre-fetched data
       let totalAvailableStock = 0;
+      let totalReservedStock = 0;
       for (const variant of product.variants) {
         const stockData = stockMap.get(variant.id);
         totalAvailableStock += stockData?.availableStock ?? variant.stock;
+        totalReservedStock += stockData?.activeReservationQuantity ?? 0;
       }
 
       return {
@@ -384,11 +476,15 @@ export class ProductService {
         createdAt: product.createdAt,
         category: product.category,
         thumbnail: product.images[0]?.url || null,
-        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+        minPrice,
+        maxPrice,
+        minFinalPrice,
         totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
         availableStock: totalAvailableStock,
+        reservedStock: totalReservedStock,
         hasVariants: product.variants.length > 0,
+        hasDiscount,
+        discountAmount: 0,
       };
     });
 
@@ -481,11 +577,17 @@ export class ProductService {
       await this.stockReservationService.getAvailableStockBulk(allVariantIds);
     const stockMap = new Map(stockInfo.map((s) => [s.variantId, s]));
 
-    // Add stock info to each variant
+    // Add stock and pricing info to each variant
+    const now = new Date();
     const variantsWithAvailableStock = product.variants.map((variant) => {
       const stockData = stockMap.get(variant.id);
+      const pricing = this.calculateVariantPricing(variant, now);
       return {
         ...variant,
+        price: pricing.basePrice,
+        finalPrice: pricing.finalPrice,
+        hasDiscount: pricing.hasDiscount,
+        discountAmount: pricing.discountAmount,
         availableStock: stockData?.availableStock ?? variant.stock,
         reservedStock: stockData?.activeReservationQuantity ?? 0,
       };

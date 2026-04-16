@@ -160,7 +160,7 @@ export class OrderService {
     // Calculate delivery charge
     const deliveryType = dto.deliveryType || DeliveryType.INSIDE_DHAKA;
     const deliveryCharge =
-      deliveryType === DeliveryType.INSIDE_DHAKA ? 70 : 150;
+      deliveryType === DeliveryType.INSIDE_DHAKA ? 120 : 200;
     total += deliveryCharge;
 
     // Get primary product ID for order/invoice number generation
@@ -293,6 +293,9 @@ export class OrderService {
               name: true,
               phone: true,
               email: true,
+              address: true,
+              city: true,
+              postalCode: true,
             },
           },
           address: {
@@ -506,6 +509,9 @@ export class OrderService {
               name: true,
               phone: true,
               email: true,
+              address: true,
+              city: true,
+              postalCode: true,
             },
           },
           items: {
@@ -660,6 +666,9 @@ export class OrderService {
                 name: true,
                 email: true,
                 phone: true,
+                address: true,
+                city: true,
+                postalCode: true,
               },
             },
           },
@@ -797,6 +806,9 @@ export class OrderService {
             name: true,
             email: true,
             phone: true,
+            address: true,
+            city: true,
+            postalCode: true,
           },
         },
         address: {

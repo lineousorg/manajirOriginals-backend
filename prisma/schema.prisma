@@ -74,26 +74,25 @@ model Product {
 }
 
 model ProductVariant {
-  id           Int                @id @default(autoincrement())
-  sku          String             @unique
-  price        Decimal            @db.Decimal(10, 2)
-  stock        Int
-  productId    Int
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  deletedAt    DateTime?
-  isActive     Boolean            @default(true)
-  isDeleted    Boolean            @default(false)
-  // Discount fields
-  discountType     DiscountType?
-  discountValue    Decimal?        @db.Decimal(10, 2)
-  discountStart    DateTime?
-  discountEnd      DateTime?
-  images       Image[]
-  orderItems   OrderItem[]
-  product      Product            @relation(fields: [productId], references: [id])
-  reservations StockReservation[]
-  attributes   VariantAttribute[]
+  id            Int                @id @default(autoincrement())
+  sku           String             @unique
+  price         Decimal            @db.Decimal(10, 2)
+  stock         Int
+  productId     Int
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  deletedAt     DateTime?
+  isActive      Boolean            @default(true)
+  isDeleted     Boolean            @default(false)
+  discountEnd   DateTime?
+  discountStart DateTime?
+  discountType  DiscountType?
+  discountValue Decimal?           @db.Decimal(10, 2)
+  images        Image[]
+  orderItems    OrderItem[]
+  product       Product            @relation(fields: [productId], references: [id])
+  reservations  StockReservation[]
+  attributes    VariantAttribute[]
 
   @@index([productId, isDeleted])
 }
@@ -158,21 +157,20 @@ model Order {
 }
 
 model OrderItem {
-  id            Int            @id @default(autoincrement())
-  orderId       Int
-  variantId     Int
-  quantity      Int
-  price         Decimal        @db.Decimal(10, 2)
-  // Discount breakdown
-  originalPrice   Decimal?      @db.Decimal(10, 2)
-  discountAmount  Decimal?       @db.Decimal(10, 2)
-  discountPercentage Int?
+  id                 Int            @id @default(autoincrement())
+  orderId            Int
+  variantId          Int
+  quantity           Int
+  price              Decimal        @db.Decimal(10, 2)
   /// *
   /// * Optional reservation ID if this item was reserved before ordering
   /// * Helps track stock properly during order cancellation
-  reservationId Int?
-  order         Order          @relation(fields: [orderId], references: [id])
-  variant       ProductVariant @relation(fields: [variantId], references: [id])
+  reservationId      Int?
+  discountAmount     Decimal?       @db.Decimal(10, 2)
+  discountPercentage Int?
+  originalPrice      Decimal?       @db.Decimal(10, 2)
+  order              Order          @relation(fields: [orderId], references: [id])
+  variant            ProductVariant @relation(fields: [variantId], references: [id])
 }
 
 model StockReservation {
