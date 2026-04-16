@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
@@ -62,6 +65,13 @@ export class ProductService {
                 stock: v.stock,
                 isActive: v.isActive ?? true,
                 isDeleted: false,
+                // Discount fields
+                discountType: v.discountType ?? null,
+                discountValue: v.discountValue ?? null,
+                discountStart: v.discountStart
+                  ? new Date(v.discountStart)
+                  : null,
+                discountEnd: v.discountEnd ? new Date(v.discountEnd) : null,
                 ...(v.attributes && {
                   attributes: {
                     create: v.attributes.map((a) => ({
@@ -133,6 +143,11 @@ export class ProductService {
               id: true,
               price: true,
               stock: true,
+              // Discount fields
+              discountType: true,
+              discountValue: true,
+              discountStart: true,
+              discountEnd: true,
             },
           },
           images: {
@@ -163,7 +178,59 @@ export class ProductService {
     }
 
     const lightweightProducts = products.map((product) => {
-      const prices = product.variants.map((v) => Number(v.price));
+      const now = new Date();
+
+      // Calculate prices with discount for each variant
+      let minPrice = 0;
+      let maxPrice = 0;
+      let hasDiscount = false;
+      let discountAmount = 0;
+      let discountPercentage = 0;
+
+      if (product.variants.length > 0) {
+        const finalPrices: number[] = [];
+
+        for (const variant of product.variants) {
+          const basePrice = Number(variant.price);
+          let finalPrice = basePrice;
+          let variantHasDiscount = false;
+          let variantDiscountAmount = 0;
+
+          // Check if discount is active
+          const isDiscountActive =
+            variant.discountType &&
+            variant.discountValue &&
+            (!variant.discountStart ||
+              now >= new Date(variant.discountStart)) &&
+            (!variant.discountEnd || now <= new Date(variant.discountEnd));
+
+          if (isDiscountActive) {
+            variantHasDiscount = true;
+            const discountValue = Number(variant.discountValue);
+
+            if (variant.discountType === 'PERCENTAGE') {
+              variantDiscountAmount = (basePrice * discountValue) / 100;
+            } else if (variant.discountType === 'FIXED') {
+              variantDiscountAmount = discountValue;
+            }
+
+            finalPrice = Math.max(0, basePrice - variantDiscountAmount);
+          }
+
+          if (variantHasDiscount) {
+            hasDiscount = true;
+            discountAmount = variantDiscountAmount;
+            if (variant.discountType === 'PERCENTAGE') {
+              discountPercentage = Number(variant.discountValue);
+            }
+          }
+
+          finalPrices.push(finalPrice);
+        }
+
+        minPrice = Math.min(...finalPrices);
+        maxPrice = Math.max(...finalPrices);
+      }
 
       // Calculate available stock using pre-fetched data
       let totalAvailableStock = 0;
@@ -182,12 +249,15 @@ export class ProductService {
         createdAt: product.createdAt,
         category: product.category,
         thumbnail: product.images[0]?.url || null,
-        minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-        maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+        minPrice,
+        maxPrice,
         totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
         availableStock: totalAvailableStock,
         reservedStock: totalReservedStock,
         hasVariants: product.variants.length > 0,
+        hasDiscount,
+        discountAmount,
+        discountPercentage,
       };
     });
 
@@ -360,6 +430,11 @@ export class ProductService {
             isActive: true,
             createdAt: true,
             updatedAt: true,
+            // Discount fields
+            discountType: true,
+            discountValue: true,
+            discountStart: true,
+            discountEnd: true,
             attributes: {
               select: {
                 attributeValue: {
@@ -547,6 +622,23 @@ export class ProductService {
                       stock: variant.stock,
                     }),
                     ...(variant.sku !== undefined && { sku: variant.sku }),
+                    // Discount fields
+                    ...(variant.discountType !== undefined && {
+                      discountType: variant.discountType,
+                    }),
+                    ...(variant.discountValue !== undefined && {
+                      discountValue: variant.discountValue,
+                    }),
+                    ...(variant.discountStart !== undefined && {
+                      discountStart: variant.discountStart
+                        ? new Date(variant.discountStart)
+                        : null,
+                    }),
+                    ...(variant.discountEnd !== undefined && {
+                      discountEnd: variant.discountEnd
+                        ? new Date(variant.discountEnd)
+                        : null,
+                    }),
                   },
                 })
               : Promise.resolve(),
@@ -562,7 +654,27 @@ export class ProductService {
             if (existingId) {
               return this.prisma.productVariant.update({
                 where: { id: existingId },
-                data: { price: variant.price, stock: variant.stock ?? 0 },
+                data: {
+                  price: variant.price,
+                  stock: variant.stock ?? 0,
+                  // Discount fields
+                  ...(variant.discountType !== undefined && {
+                    discountType: variant.discountType,
+                  }),
+                  ...(variant.discountValue !== undefined && {
+                    discountValue: variant.discountValue,
+                  }),
+                  ...(variant.discountStart !== undefined && {
+                    discountStart: variant.discountStart
+                      ? new Date(variant.discountStart)
+                      : null,
+                  }),
+                  ...(variant.discountEnd !== undefined && {
+                    discountEnd: variant.discountEnd
+                      ? new Date(variant.discountEnd)
+                      : null,
+                  }),
+                },
               });
             } else {
               // Create new variant with attributes
@@ -576,6 +688,15 @@ export class ProductService {
                   stock: variant.stock ?? 0,
                   isActive: true,
                   isDeleted: false,
+                  // Discount fields
+                  discountType: variant.discountType ?? null,
+                  discountValue: variant.discountValue ?? null,
+                  discountStart: variant.discountStart
+                    ? new Date(variant.discountStart)
+                    : null,
+                  discountEnd: variant.discountEnd
+                    ? new Date(variant.discountEnd)
+                    : null,
                   // Connect attributes if provided
                   ...(hasAttributes && {
                     attributes: {

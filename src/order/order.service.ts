@@ -118,13 +118,41 @@ export class OrderService {
     let total = 0;
     const orderItemsData = dto.items.map((item) => {
       const variant = variants.find((v) => v.id === item.variantId)!;
-      const itemTotal = Number(variant.price) * item.quantity;
+
+      // Calculate discount
+      const basePrice = Number(variant.price);
+      let finalPrice = basePrice;
+      let discountAmount = 0;
+      let discountPercentage: number | null = null;
+
+      // Check if discount is active
+      const now = new Date();
+      if (
+        variant.discountType &&
+        variant.discountValue &&
+        (!variant.discountStart || now >= new Date(variant.discountStart)) &&
+        (!variant.discountEnd || now <= new Date(variant.discountEnd))
+      ) {
+        const discountValue = Number(variant.discountValue);
+        if (variant.discountType === 'PERCENTAGE') {
+          discountAmount = (basePrice * discountValue) / 100;
+          discountPercentage = discountValue;
+        } else if (variant.discountType === 'FIXED') {
+          discountAmount = discountValue;
+        }
+        finalPrice = Math.max(0, basePrice - discountAmount);
+      }
+
+      const itemTotal = finalPrice * item.quantity;
       total += itemTotal;
 
       return {
         variantId: item.variantId,
         quantity: item.quantity,
-        price: variant.price,
+        price: finalPrice,
+        originalPrice: basePrice,
+        discountAmount: discountAmount || null,
+        discountPercentage: discountPercentage,
         reservationId: item.reservationId || null,
       };
     });
@@ -343,13 +371,41 @@ export class OrderService {
     let total = 0;
     const orderItemsData = dto.items.map((item) => {
       const variant = variants.find((v) => v.id === item.variantId)!;
-      const itemTotal = Number(variant.price) * item.quantity;
+
+      // Calculate discount
+      const basePrice = Number(variant.price);
+      let finalPrice = basePrice;
+      let discountAmount = 0;
+      let discountPercentage: number | null = null;
+
+      // Check if discount is active
+      const now = new Date();
+      if (
+        variant.discountType &&
+        variant.discountValue &&
+        (!variant.discountStart || now >= new Date(variant.discountStart)) &&
+        (!variant.discountEnd || now <= new Date(variant.discountEnd))
+      ) {
+        const discountValue = Number(variant.discountValue);
+        if (variant.discountType === 'PERCENTAGE') {
+          discountAmount = (basePrice * discountValue) / 100;
+          discountPercentage = discountValue;
+        } else if (variant.discountType === 'FIXED') {
+          discountAmount = discountValue;
+        }
+        finalPrice = Math.max(0, basePrice - discountAmount);
+      }
+
+      const itemTotal = finalPrice * item.quantity;
       total += itemTotal;
 
       return {
         variantId: item.variantId,
         quantity: item.quantity,
-        price: variant.price,
+        price: finalPrice,
+        originalPrice: basePrice,
+        discountAmount: discountAmount || null,
+        discountPercentage: discountPercentage,
         reservationId: item.reservationId || null,
       };
     });
@@ -965,7 +1021,14 @@ export class OrderService {
         },
         address: true,
         items: {
-          include: {
+          select: {
+            id: true,
+            variantId: true,
+            quantity: true,
+            price: true,
+            originalPrice: true,
+            discountAmount: true,
+            discountPercentage: true,
             variant: {
               include: {
                 product: {
@@ -1442,15 +1505,19 @@ export class OrderService {
         });
 
         // Price - right aligned, using BDT instead of symbol
-        doc.text(
-          formatCurrency(Number(item.price)),
-          colPositions.price,
-          yPos + 11,
-          {
-            width: 60,
-            align: 'right',
-          },
-        );
+        // Show original price if discount exists
+        let priceText = formatCurrency(Number(item.price));
+        if (item.discountAmount && Number(item.discountAmount) > 0) {
+          // Show original price struck through concept (but just show original)
+          const originalPrice = item.originalPrice
+            ? formatCurrency(Number(item.originalPrice))
+            : formatCurrency(Number(item.price));
+          priceText = `${originalPrice}`;
+        }
+        doc.text(priceText, colPositions.price, yPos + 11, {
+          width: 60,
+          align: 'right',
+        });
 
         // Total - right aligned
         doc.fillColor(primaryColor).font('Helvetica-Bold');
@@ -1482,6 +1549,14 @@ export class OrderService {
       const deliveryCharge = Number(order.deliveryCharge) || 0;
       const itemSubtotal = Number(order.total) - deliveryCharge;
 
+      // Calculate total discount from items
+      let totalDiscount = 0;
+      for (const item of order.items) {
+        if (item.discountAmount) {
+          totalDiscount += Number(item.discountAmount) * item.quantity;
+        }
+      }
+
       doc.fontSize(9).font('Helvetica');
 
       // Subtotal
@@ -1494,6 +1569,25 @@ export class OrderService {
       });
 
       yPos += 16;
+
+      // Discount (if any)
+      if (totalDiscount > 0) {
+        doc.fillColor('#16a34a'); // Green color for discount
+        doc.text('Discount Saved:', totalsX, yPos, {
+          width: 110,
+          align: 'left',
+        });
+        doc.text(
+          `-${formatCurrency(totalDiscount)}`,
+          totalsX + 110,
+          yPos,
+          {
+            width: 110,
+            align: 'right',
+          },
+        );
+        yPos += 16;
+      }
 
       // Delivery
       doc.fillColor(secondaryColor);

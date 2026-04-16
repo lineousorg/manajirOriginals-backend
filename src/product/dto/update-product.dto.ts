@@ -5,8 +5,11 @@ import {
   IsString,
   ValidateNested,
   IsArray,
+  IsEnum,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { DiscountType } from '@prisma/client';
 
 export class UpdateProductVariantDto {
   @IsOptional()
@@ -24,6 +27,23 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsString()
   sku?: string;
+
+  // Discount fields
+  @IsOptional()
+  @IsEnum(DiscountType)
+  discountType?: DiscountType;
+
+  @IsOptional()
+  @IsNumber()
+  discountValue?: number;
+
+  @IsOptional()
+  @IsDateString()
+  discountStart?: string;
+
+  @IsOptional()
+  @IsDateString()
+  discountEnd?: string;
 
   /**
    * For creating new variants with attributes

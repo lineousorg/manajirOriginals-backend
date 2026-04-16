@@ -84,6 +84,11 @@ model ProductVariant {
   deletedAt    DateTime?
   isActive     Boolean            @default(true)
   isDeleted    Boolean            @default(false)
+  // Discount fields
+  discountType     DiscountType?
+  discountValue    Decimal?        @db.Decimal(10, 2)
+  discountStart    DateTime?
+  discountEnd      DateTime?
   images       Image[]
   orderItems   OrderItem[]
   product      Product            @relation(fields: [productId], references: [id])
@@ -158,6 +163,10 @@ model OrderItem {
   variantId     Int
   quantity      Int
   price         Decimal        @db.Decimal(10, 2)
+  // Discount breakdown
+  originalPrice   Decimal?      @db.Decimal(10, 2)
+  discountAmount  Decimal?       @db.Decimal(10, 2)
+  discountPercentage Int?
   /// *
   /// * Optional reservation ID if this item was reserved before ordering
   /// * Helps track stock properly during order cancellation
@@ -235,4 +244,9 @@ enum PaymentMethod {
 enum DeliveryType {
   INSIDE_DHAKA
   OUTSIDE_DHAKA
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
 }

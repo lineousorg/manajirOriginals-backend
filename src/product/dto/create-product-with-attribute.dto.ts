@@ -5,8 +5,11 @@ import {
   ValidateNested,
   IsOptional,
   IsBoolean,
+  IsEnum,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { DiscountType } from '@prisma/client';
 
 export class VariantAttributeDto {
   @IsNumber()
@@ -30,6 +33,23 @@ export class VariantWithAttributesDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // Discount fields
+  @IsOptional()
+  @IsEnum(DiscountType)
+  discountType?: DiscountType;
+
+  @IsOptional()
+  @IsNumber()
+  discountValue?: number;
+
+  @IsOptional()
+  @IsDateString()
+  discountStart?: string;
+
+  @IsOptional()
+  @IsDateString()
+  discountEnd?: string;
 
   @IsArray()
   @ValidateNested({ each: true })
