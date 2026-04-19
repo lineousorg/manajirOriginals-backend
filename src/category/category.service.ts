@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+
 import {
   Injectable,
   NotFoundException,
@@ -20,47 +20,54 @@ export class CategoryService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateCategoryDto) {
-    // Check if slug already exists
+    // Check if slug already exists (among non-deleted categories)
     const existing = await this.prisma.category.findUnique({
-      where: { slug: dto.slug },
+      where: { slug: dto.slug, isDeleted: false },
     });
 
     if (existing) {
       throw new ConflictException('Category with this slug already exists');
     }
 
-    // Validate parentId if provided
+    // Validate parentId if provided and check for circular reference
     if (dto.parentId) {
-      const parent = await this.prisma.category.findUnique({
-        where: { id: dto.parentId },
-      });
-      if (!parent) {
-        throw new NotFoundException('Parent category not found');
-      }
+      await this.validateParentCategory(dto.parentId);
     }
 
-    const category = await this.prisma.category.create({
-      data: {
-        name: dto.name,
-        slug: dto.slug,
-        parentId: dto.parentId ?? null,
-        isActive: dto.isActive ?? true,
-        images: dto.images
-          ? {
-              create: dto.images.map((img, index) => ({
-                url: img.url,
-                altText: img.altText ?? null,
-                position: img.position ?? index,
-                type: 'CATEGORY',
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        parent: true,
-        children: true,
-        images: true,
-      },
+    // Use transaction for atomicity
+    const category = await this.prisma.$transaction(async (tx) => {
+      try {
+        const created = await tx.category.create({
+          data: {
+            name: dto.name,
+            slug: dto.slug,
+            parentId: dto.parentId ?? null,
+            isActive: dto.isActive ?? true,
+            images: dto.images
+              ? {
+                  create: dto.images.map((img, index) => ({
+                    url: img.url,
+                    altText: img.altText ?? null,
+                    position: img.position ?? index,
+                    type: 'CATEGORY',
+                  })),
+                }
+              : undefined,
+          },
+          include: {
+            parent: true,
+            children: true,
+            images: true,
+          },
+        });
+        return created;
+      } catch (error: any) {
+        // Handle unique constraint violation (slug race condition)
+        if (error.code === 'P2002') {
+          throw new ConflictException('Category with this slug already exists');
+        }
+        throw error;
+      }
     });
 
     return {
@@ -83,7 +90,7 @@ export class CategoryService {
     // Check if slug is being changed and if it's already taken
     if (dto.slug && dto.slug !== existing.slug) {
       const slugTaken = await this.prisma.category.findUnique({
-        where: { slug: dto.slug },
+        where: { slug: dto.slug, isDeleted: false },
       });
 
       if (slugTaken) {
@@ -91,52 +98,60 @@ export class CategoryService {
       }
     }
 
-    // Validate parentId if provided
+    // Validate parentId if provided and check for circular reference
     if (dto.parentId && dto.parentId !== existing.parentId) {
       // Prevent setting itself as parent
       if (dto.parentId === id) {
         throw new ConflictException('Category cannot be its own parent');
       }
 
-      const parent = await this.prisma.category.findUnique({
-        where: { id: dto.parentId },
-      });
-      if (!parent) {
-        throw new NotFoundException('Parent category not found');
-      }
+      await this.validateParentCategory(dto.parentId, id);
     }
 
-    // Extract images from dto and prepare update data
+    // Extract images from dto
     const { images, ...rest } = dto;
 
-    // Prepare update data - handle parentId separately
+    // Remove undefined values
     const updateData: any = { ...rest };
     if (dto.parentId !== undefined) {
       updateData.parentId = dto.parentId;
     }
 
-    const category = await this.prisma.category.update({
-      where: { id },
-      data: {
-        ...updateData,
+    // Use transaction for atomicity
+    const category = await this.prisma.$transaction(async (tx) => {
+      try {
         // Handle images update if provided
-        ...(images && {
-          images: {
-            deleteMany: {},
-            create: images.map((img, index) => ({
-              url: img.url,
+        if (images && images.length > 0) {
+          // Simple approach: delete all existing images and create new ones
+          // This is atomic within the transaction
+          await tx.image.deleteMany({ where: { categoryId: id } });
+          await tx.image.createMany({
+            data: images.map((img, index) => ({
+              url: img.url!,
               altText: img.altText ?? null,
               position: img.position ?? index,
               type: 'CATEGORY',
+              categoryId: id,
             })),
+          });
+        }
+
+        const updated = await tx.category.update({
+          where: { id },
+          data: updateData,
+          include: {
+            parent: true,
+            children: true,
+            images: true,
           },
-        }),
-      },
-      include: {
-        parent: true,
-        children: true,
-        images: true,
-      },
+        });
+        return updated;
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('Category with this slug already exists');
+        }
+        throw error;
+      }
     });
 
     return {
@@ -152,8 +167,11 @@ export class CategoryService {
     const { page = 1, limit = 20 } = pagination;
     const skip = (page - 1) * limit;
 
+    const whereClause = { isDeleted: false };
+
     const [categories, total] = await Promise.all([
       this.prisma.category.findMany({
+        where: whereClause,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -193,7 +211,7 @@ export class CategoryService {
           },
         },
       }),
-      this.prisma.category.count(),
+      this.prisma.category.count({ where: whereClause }),
     ]);
 
     return createPaginatedResponse(
@@ -213,6 +231,7 @@ export class CategoryService {
         name: true,
         slug: true,
         isActive: true,
+        isDeleted: true,
         parentId: true,
         createdAt: true,
         updatedAt: true,
@@ -257,6 +276,11 @@ export class CategoryService {
       throw new NotFoundException('Category not found');
     }
 
+    // Check if category is soft-deleted
+    if (category.isDeleted) {
+      throw new NotFoundException('Category not found');
+    }
+
     return {
       message: 'Category found',
       status: 'success',
@@ -271,6 +295,17 @@ export class CategoryService {
 
     if (!category) {
       throw new NotFoundException('Category not found');
+    }
+
+    // Check if category has children - prevent toggle if children exist
+    const childCount = await this.prisma.category.count({
+      where: { parentId: id, isDeleted: false },
+    });
+
+    if (childCount > 0) {
+      throw new ConflictException(
+        'Cannot toggle status of category with subcategories. Please toggle subcategories first.',
+      );
     }
 
     const updated = await this.prisma.category.update({
@@ -288,11 +323,22 @@ export class CategoryService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
+    const category = await this.prisma.category.findUnique({
+      where: { id },
+    });
 
-    // Check if category has products
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    // Check if already soft-deleted
+    if (category.isDeleted) {
+      throw new ConflictException('Category already deleted');
+    }
+
+    // Check if category has products (including non-deleted)
     const productCount = await this.prisma.product.count({
-      where: { categoryId: id },
+      where: { categoryId: id, isDeleted: false },
     });
 
     if (productCount > 0) {
@@ -301,17 +347,22 @@ export class CategoryService {
       );
     }
 
-    // Check if category has children
+    // Check if category has children (non-deleted)
     const childCount = await this.prisma.category.count({
-      where: { parentId: id },
+      where: { parentId: id, isDeleted: false },
     });
 
     if (childCount > 0) {
       throw new ConflictException('Cannot delete category with subcategories');
     }
 
-    await this.prisma.category.delete({
+    // Soft delete
+    await this.prisma.category.update({
       where: { id },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
     });
 
     return {
@@ -319,5 +370,38 @@ export class CategoryService {
       status: 'success',
       data: null,
     };
+  }
+
+  // Helper method to validate parent category and check for circular references
+  private async validateParentCategory(parentId: number, currentId?: number) {
+    // Check if parent exists and is not soft-deleted
+    const parent = await this.prisma.category.findUnique({
+      where: { id: parentId },
+    });
+
+    if (!parent) {
+      throw new NotFoundException('Parent category not found');
+    }
+
+    if (parent.isDeleted) {
+      throw new ConflictException(
+        'Cannot use a soft-deleted category as parent',
+      );
+    }
+
+    // Check for circular reference (only if currentId is provided - i.e., during update)
+    if (currentId !== undefined) {
+      let ancestor = parent;
+      while (ancestor.parentId) {
+        if (ancestor.parentId === currentId) {
+          throw new ConflictException('Circular category reference detected');
+        }
+        const nextAncestor = await this.prisma.category.findUnique({
+          where: { id: ancestor.parentId },
+        });
+        if (!nextAncestor) break;
+        ancestor = nextAncestor;
+      }
+    }
   }
 }

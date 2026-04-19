@@ -5,6 +5,8 @@ import {
   IsArray,
   ValidateNested,
   IsBoolean,
+  Matches,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -25,10 +27,15 @@ export class UpdateCategoryImageDto {
 export class UpdateCategoryDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   name?: string;
 
   @IsString()
   @IsOptional()
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message:
+      'Slug must be lowercase, hyphen-separated, and contain only letters and numbers',
+  })
   slug?: string;
 
   @IsOptional()

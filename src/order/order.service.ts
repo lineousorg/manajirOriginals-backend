@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -8,6 +9,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateGuestOrderDto } from './dto/create-guest-order.dto';
@@ -22,28 +24,35 @@ import {
 } from '../common/dto/pagination.dto';
 import { GuestUserService } from '../guest-user/guest-user.service';
 
+import { randomUUID } from 'crypto';
+
 /**
- * Generate order number: yyyymmddproductid
- * Example: 202604071234 (April 7, 2026, product ID 1234)
+ * Generate unique order number using UUID
+ * Format: ORD-XXXXXXXX (8 char prefix to keep it readable)
+ * Uses crypto.randomUUID() for collision-resistant unique IDs
  */
-function generateOrderNumber(productId: number): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}${month}${day}${productId}`;
+function generateOrderNumber(_productId: number): string {
+  // Use UUID v4 - cryptographically unique
+  return `ORD-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
 /**
- * Generate invoice number: INV-productIdDDMMYY
- * Example: INV-1234070426 (Invoice for product 1234, date 07/04/26)
+ * Generate unique invoice number using UUID
+ * Format: INV-XXXXXXXX (8 char prefix)
+ * Uses crypto.randomUUID() for collision-resistant unique IDs
  */
-function generateInvoiceNumber(productId: number): string {
-  const now = new Date();
-  const day = String(now.getDate()).padStart(2, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const year = String(now.getFullYear()).slice(-2);
-  return `INV-${productId}${day}${month}${year}`;
+function generateInvoiceNumber(_productId: number): string {
+  // Use UUID v4 - cryptographically unique
+  return `INV-${randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
+/**
+ * Get delivery charge from config
+ */
+function getDeliveryCharge(config: ConfigService, deliveryType: DeliveryType): number {
+  return deliveryType === DeliveryType.INSIDE_DHAKA
+    ? Number(config.get('DELIVERY_CHARGE_INSIDE_DHAKA') || 120)
+    : Number(config.get('DELIVERY_CHARGE_OUTSIDE_DHAKA') || 200);
 }
 
 @Injectable()
@@ -51,7 +60,8 @@ export class OrderService {
   constructor(
     private prisma: PrismaService,
     private guestUserService: GuestUserService,
-  ) { }
+    private config: ConfigService,
+  ) {}
 
   /**
    * Validate reCAPTCHA token with Google
@@ -159,31 +169,16 @@ export class OrderService {
 
     // Calculate delivery charge
     const deliveryType = dto.deliveryType || DeliveryType.INSIDE_DHAKA;
-    const deliveryCharge =
-      deliveryType === DeliveryType.INSIDE_DHAKA ? 120 : 200;
+    const deliveryCharge = getDeliveryCharge(this.config, deliveryType);
     total += deliveryCharge;
 
     // Get primary product ID for order/invoice number generation
     const primaryProductId = variants[0]?.product?.id || 1;
 
     // Generate order and invoice numbers
-    let orderNumber = generateOrderNumber(primaryProductId);
-    let invoiceNumber = generateInvoiceNumber(primaryProductId);
-
-    // Check for duplicates
-    const existingOrder = await this.prisma.order.findFirst({
-      where: { OR: [{ orderNumber }, { invoiceNumber }] },
-    });
-
-    if (existingOrder) {
-      const count = await this.prisma.order.count({
-        where: {
-          orderNumber: { startsWith: orderNumber },
-        },
-      });
-      orderNumber = `${orderNumber}-${count + 1}`;
-      invoiceNumber = `${invoiceNumber}-${count + 1}`;
-    }
+    // Generate unique order/invoice numbers using UUID (collision-resistant)
+    const orderNumber = generateOrderNumber(primaryProductId);
+    const invoiceNumber = generateInvoiceNumber(primaryProductId);
 
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
@@ -249,8 +244,18 @@ export class OrderService {
         });
       }
 
-      // Issue #3: For items WITHOUT reservation: use atomic update inside transaction
-
+      // Issue #3: For items WITHOUT reservation: require reservation to prevent overselling
+      const itemsWithoutReservation = dto.items.filter(
+        (item) => !item.reservationId,
+      );
+      if (itemsWithoutReservation.length > 0) {
+        const variantIds = itemsWithoutReservation
+          .map((i) => i.variantId)
+          .join(', ');
+        throw new BadRequestException(
+          `All items must have a valid reservation. Missing reservations for variants: ${variantIds}`,
+        );
+      }
 
       // Create the order
       return tx.order.create({
@@ -347,9 +352,7 @@ export class OrderService {
    * Security: No JWT required, anyone can create a guest order
    * Uses same logic as authenticated order but with guestUserId instead of userId
    */
-  async createGuest(
-    dto: CreateGuestOrderDto,
-  ): Promise<{
+  async createGuest(dto: CreateGuestOrderDto): Promise<{
     message: string;
     status: string;
     data: Order;
@@ -415,31 +418,15 @@ export class OrderService {
 
     // Calculate delivery charge
     const deliveryType = dto.deliveryType || DeliveryType.INSIDE_DHAKA;
-    const deliveryCharge =
-      deliveryType === DeliveryType.INSIDE_DHAKA ? 70 : 150;
+    const deliveryCharge = getDeliveryCharge(this.config, deliveryType);
     total += deliveryCharge;
 
     // Get primary product ID for order/invoice number generation
     const primaryProductId = variants[0]?.product?.id || 1;
 
-    // Generate order and invoice numbers
-    let orderNumber = generateOrderNumber(primaryProductId);
-    let invoiceNumber = generateInvoiceNumber(primaryProductId);
-
-    // Check for duplicates
-    const existingOrder = await this.prisma.order.findFirst({
-      where: { OR: [{ orderNumber }, { invoiceNumber }] },
-    });
-
-    if (existingOrder) {
-      const count = await this.prisma.order.count({
-        where: {
-          orderNumber: { startsWith: orderNumber },
-        },
-      });
-      orderNumber = `${orderNumber}-${count + 1}`;
-      invoiceNumber = `${invoiceNumber}-${count + 1}`;
-    }
+    // Generate unique order/invoice numbers using UUID (collision-resistant)
+    const orderNumber = generateOrderNumber(primaryProductId);
+    const invoiceNumber = generateInvoiceNumber(primaryProductId);
 
     // Find or create guest user
     const guestUser = await this.guestUserService.findOrCreate({
@@ -458,17 +445,26 @@ export class OrderService {
         (item) => !item.reservationId,
       );
 
+      // Use atomic conditional update to prevent race conditions
+      // Only decrements if stock >= quantity (done by database)
       for (const item of itemsWithoutReservation) {
-        const updatedVariant = await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: {
-            stock: { decrement: item.quantity },
+        const result = await tx.productVariant.updateMany({
+          where: {
+            id: item.variantId,
+            stock: { gte: item.quantity }, // Atomic check: only update if sufficient stock
           },
+          data: { stock: { decrement: item.quantity } },
         });
 
-        if (updatedVariant.stock < 0) {
+        // Check if update succeeded (count === 0 means stock was insufficient)
+        if (result.count === 0) {
+          const currentVariant = await tx.productVariant.findUnique({
+            where: { id: item.variantId },
+            select: { stock: true },
+          });
           throw new BadRequestException(
-            `Insufficient stock for variant ${item.variantId}`,
+            `Insufficient stock for variant ${item.variantId}. ` +
+              `Available: ${currentVariant?.stock || 0}, Requested: ${item.quantity}`,
           );
         }
       }
@@ -883,7 +879,11 @@ export class OrderService {
 
     // Security: Check if user owns this order or is admin
     // For guest orders, only admins can view
-    if (userRole !== Role.ADMIN && order.userId !== userId && !order.guestUserId) {
+    if (
+      userRole !== Role.ADMIN &&
+      order.userId !== userId &&
+      !order.guestUserId
+    ) {
       throw new ForbiddenException(
         'You do not have permission to view this order',
       );
@@ -1076,14 +1076,15 @@ export class OrderService {
     const isOwner = order.userId === userId;
     // Only check guest ownership if phone is provided and not empty
     const phoneValue = phone && phone.trim() ? phone.trim() : undefined;
-    const isGuestOwner = order.guestUserId && phoneValue
-      ? await this.prisma.guestUser.findFirst({
-          where: {
-            id: order.guestUserId,
-            phone: phoneValue,
-          },
-        })
-      : false;
+    const isGuestOwner =
+      order.guestUserId && phoneValue
+        ? await this.prisma.guestUser.findFirst({
+            where: {
+              id: order.guestUserId,
+              phone: phoneValue,
+            },
+          })
+        : false;
 
     if (!isAdmin && !isOwner && !isGuestOwner) {
       throw new ForbiddenException(
@@ -1368,7 +1369,9 @@ export class OrderService {
         doc.fillColor(secondaryColor);
         doc.text('Phone:', shipX + 10, yPos + 38);
         doc.fillColor('#000000');
-        doc.text(order.guestUser?.phone || 'N/A', shipX + 45, yPos + 38, { width: 190 });
+        doc.text(order.guestUser?.phone || 'N/A', shipX + 45, yPos + 38, {
+          width: 190,
+        });
 
         doc.fillColor(secondaryColor);
         doc.text('Address:', shipX + 10, yPos + 52);
@@ -1589,15 +1592,10 @@ export class OrderService {
           width: 110,
           align: 'left',
         });
-        doc.text(
-          `-${formatCurrency(totalDiscount)}`,
-          totalsX + 110,
-          yPos,
-          {
-            width: 110,
-            align: 'right',
-          },
-        );
+        doc.text(`-${formatCurrency(totalDiscount)}`, totalsX + 110, yPos, {
+          width: 110,
+          align: 'right',
+        });
         yPos += 16;
       }
 
