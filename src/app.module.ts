@@ -16,6 +16,7 @@ import { join } from 'path';
 import { FileModule } from './common/file.module';
 import { StockReservationModule } from './stock-reservation/stock-reservation.module';
 import { GuestUserModule } from './guest-user/guest-user.module';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { GuestUserModule } from './guest-user/guest-user.module';
     FileModule,
     StockReservationModule,
     GuestUserModule,
+    CommonModule,
   ],
   controllers: [AppController],
   providers: [AppService],

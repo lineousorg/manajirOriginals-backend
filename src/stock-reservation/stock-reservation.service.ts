@@ -53,6 +53,45 @@ export class StockReservationService {
       effectiveUserId = -1; // Negative ID indicates anonymous reservation
     }
 
+    // FIX #4: Add idempotency check - prevent duplicate reservations within 10 seconds
+    // Only apply for non-anonymous users (exclude userId = -1)
+    if (effectiveUserId > 0) {
+      const recentReservation = await this.prisma.stockReservation.findFirst({
+        where: {
+          variantId,
+          userId: effectiveUserId,
+          status: 'ACTIVE',
+          expiresAt: { gt: new Date() },
+          createdAt: { gte: new Date(Date.now() - 10000) }, // Last 10 seconds
+        },
+        select: { id: true },
+      });
+
+      if (recentReservation) {
+        throw new ConflictException(
+          'A reservation already exists for this item. Please wait or release it first.',
+        );
+      }
+    }
+
+    // FIX #5: Add max reservation limit per user (exclude anonymous)
+    if (effectiveUserId > 0) {
+      const MAX_RESERVATIONS_PER_USER = 5;
+      const userActiveReservations = await this.prisma.stockReservation.count({
+        where: {
+          userId: effectiveUserId,
+          status: 'ACTIVE',
+          expiresAt: { gt: new Date() },
+        },
+      });
+
+      if (userActiveReservations >= MAX_RESERVATIONS_PER_USER) {
+        throw new BadRequestException(
+          `Maximum ${MAX_RESERVATIONS_PER_USER} active reservations allowed. Please complete or release existing reservations first.`,
+        );
+      }
+    }
+
     // Calculate expiration time
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + expirationMinutes);
@@ -493,35 +532,75 @@ export class StockReservationService {
       };
     }
 
+    // Track how many were actually processed
+    let restoredCount = 0;
+    const skippedReservations: number[] = [];
+
     // Use transaction to restore stock and update status
     await this.prisma.$transaction(async (tx) => {
       // Restore stock for each expired reservation
       for (const reservation of expiredReservations) {
-        await tx.productVariant.update({
+        // FIX #1: Check variant exists AND is not deleted before restoring stock
+        const variant = await tx.productVariant.findUnique({
           where: { id: reservation.variantId },
-          data: { stock: { increment: reservation.quantity } },
+          select: { id: true, isDeleted: true },
         });
+
+        // Only restore if variant exists and wasn't permanently deleted
+        if (variant && !variant.isDeleted) {
+          await tx.productVariant.update({
+            where: { id: reservation.variantId },
+            data: { stock: { increment: reservation.quantity } },
+          });
+          restoredCount++;
+        } else {
+          // Log for admin review (variant was deleted before reservation expired)
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[StockReservation] Skipped stock restore for deleted variant ${reservation.variantId}, reservation ${reservation.id}`,
+          );
+          skippedReservations.push(reservation.id);
+        }
       }
 
-      // Update all expired reservations to EXPIRED status
-      const result = await tx.stockReservation.updateMany({
-        where: {
-          status: 'ACTIVE',
-          expiresAt: { lte: new Date() },
-        },
-        data: {
-          status: 'EXPIRED',
-          updatedAt: new Date(),
-        },
-      });
+      // Update all expired reservations to EXPIRED status (only those we processed)
+      // We only mark as EXPIRED the ones we successfully handled
+      if (skippedReservations.length > 0) {
+        // Mark processed ones as EXPIRED, keep skipped ones as ACTIVE for manual review
+        const processedIds = expiredReservations
+          .filter((r) => !skippedReservations.includes(r.id))
+          .map((r) => r.id);
 
-      return result;
+        if (processedIds.length > 0) {
+          await tx.stockReservation.updateMany({
+            where: { id: { in: processedIds } },
+            data: { status: 'EXPIRED', updatedAt: new Date() },
+          });
+        }
+      } else {
+        // All processed successfully - update all
+        await tx.stockReservation.updateMany({
+          where: {
+            status: 'ACTIVE',
+            expiresAt: { lte: new Date() },
+          },
+          data: {
+            status: 'EXPIRED',
+            updatedAt: new Date(),
+          },
+        });
+      }
     });
 
     return {
       message: `Released ${expiredReservations.length} expired reservations and restored stock`,
       status: 'success',
-      data: { count: expiredReservations.length },
+      data: {
+        totalFound: expiredReservations.length,
+        restored: restoredCount,
+        skipped: skippedReservations.length,
+        skippedReservationIds: skippedReservations,
+      },
     };
   }
 
@@ -582,32 +661,67 @@ export class StockReservationService {
       };
     }
 
+    // Track how many were actually processed
+    let restoredCount = 0;
+    const skippedReservations: number[] = [];
+
     // Use transaction to restore stock and update status
     await this.prisma.$transaction(async (tx) => {
       // Restore stock for each active reservation
       for (const reservation of activeReservations) {
-        await tx.productVariant.update({
+        // FIX #2: Check variant exists AND is not deleted before restoring stock
+        const variant = await tx.productVariant.findUnique({
           where: { id: reservation.variantId },
-          data: { stock: { increment: reservation.quantity } },
+          select: { id: true, isDeleted: true },
         });
+
+        // Only restore if variant exists and wasn't permanently deleted
+        if (variant && !variant.isDeleted) {
+          await tx.productVariant.update({
+            where: { id: reservation.variantId },
+            data: { stock: { increment: reservation.quantity } },
+          });
+          restoredCount++;
+        } else {
+          // Log for admin review
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[StockReservation] Force clean skipped for deleted variant ${reservation.variantId}, reservation ${reservation.id}`,
+          );
+          skippedReservations.push(reservation.id);
+        }
       }
 
-      // Update all active reservations to EXPIRED status
-      await tx.stockReservation.updateMany({
-        where: {
-          status: 'ACTIVE',
-        },
-        data: {
-          status: 'EXPIRED',
-          updatedAt: new Date(),
-        },
-      });
+      // Update all active reservations to EXPIRED status (only those we processed successfully)
+      if (skippedReservations.length > 0) {
+        const processedIds = activeReservations
+          .filter((r) => !skippedReservations.includes(r.id))
+          .map((r) => r.id);
+
+        if (processedIds.length > 0) {
+          await tx.stockReservation.updateMany({
+            where: { id: { in: processedIds } },
+            data: { status: 'EXPIRED', updatedAt: new Date() },
+          });
+        }
+      } else {
+        // All processed successfully - update all
+        await tx.stockReservation.updateMany({
+          where: { status: 'ACTIVE' },
+          data: { status: 'EXPIRED', updatedAt: new Date() },
+        });
+      }
     });
 
     return {
       message: `Force cleaned ${activeReservations.length} active reservations and restored stock`,
       status: 'success',
-      data: { count: activeReservations.length },
+      data: {
+        totalFound: activeReservations.length,
+        restored: restoredCount,
+        skipped: skippedReservations.length,
+        skippedReservationIds: skippedReservations,
+      },
     };
   }
 }

@@ -7,9 +7,11 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockReservationService } from '../stock-reservation/stock-reservation.service';
+import { PricingService } from '../common/services/pricing.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
@@ -25,61 +27,15 @@ export class ProductService {
   constructor(
     private prisma: PrismaService,
     private stockReservationService: StockReservationService,
+    private pricingService: PricingService,
   ) {}
 
   /**
    * Calculate variant pricing with discount validation
-   * Used for consistent price calculation across all endpoints
+   * Delegates to shared PricingService for consistency
    */
   private calculateVariantPricing(variant: any, now: Date) {
-    const basePrice = Number(variant.price);
-    let finalPrice = basePrice;
-    let hasDiscount = false;
-    let discountAmount = 0;
-
-    // Pre-calc dates outside discount check
-    const discountStart = variant.discountStart
-      ? new Date(variant.discountStart)
-      : null;
-    const discountEnd = variant.discountEnd
-      ? new Date(variant.discountEnd)
-      : null;
-
-    // Validate discount values - must be > 0
-    const discountValue =
-      variant.discountValue && Number(variant.discountValue) > 0
-        ? Number(variant.discountValue)
-        : 0;
-
-    // Check if discount is active with proper validation
-    const isDiscountActive =
-      variant.discountType &&
-      discountValue > 0 &&
-      (!discountStart || now >= discountStart) &&
-      (!discountEnd || now <= discountEnd);
-
-    if (isDiscountActive) {
-      hasDiscount = true;
-
-      if (variant.discountType === 'PERCENTAGE') {
-        // Clamp percentage to max 100%
-        const clampedPercentage = Math.min(100, discountValue);
-        discountAmount = (basePrice * clampedPercentage) / 100;
-      } else if (variant.discountType === 'FIXED') {
-        // Clamp fixed discount to not exceed base price
-        discountAmount = Math.min(basePrice, discountValue);
-      }
-
-      finalPrice = Math.max(0, basePrice - discountAmount);
-    }
-
-    return {
-      basePrice,
-      finalPrice,
-      hasDiscount,
-      discountAmount,
-      discountType: hasDiscount ? variant.discountType : null,
-    };
+    return this.pricingService.calculateVariantPricing(variant, now);
   }
 
   async create(dto: CreateProductDto) {
@@ -852,6 +808,32 @@ export class ProductService {
   }
 
   async remove(id: number) {
+    // FIX #8: Check if product has variants with active reservations before deletion
+    const variants = await this.prisma.productVariant.findMany({
+      where: { productId: id, isDeleted: false },
+      select: { id: true },
+    });
+
+    if (variants.length > 0) {
+      const variantIds = variants.map((v) => v.id);
+
+      // Check for active reservations on any variant
+      const activeReservations = await this.prisma.stockReservation.count({
+        where: {
+          variantId: { in: variantIds },
+          status: 'ACTIVE',
+          expiresAt: { gt: new Date() },
+        },
+      });
+
+      if (activeReservations > 0) {
+        throw new BadRequestException(
+          `Cannot delete product: ${activeReservations} active reservation(s) found on its variants. ` +
+            `Please wait for reservations to expire or release them first.`,
+        );
+      }
+    }
+
     // Soft delete the product
     await this.prisma.product.update({
       where: { id },
@@ -926,6 +908,22 @@ export class ProductService {
     });
     if (!variant || variant.productId !== productId) {
       throw new NotFoundException('Variant not found');
+    }
+
+    // FIX #9: Check if variant has active reservations before deletion
+    const activeReservations = await this.prisma.stockReservation.count({
+      where: {
+        variantId: variantId,
+        status: 'ACTIVE',
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (activeReservations > 0) {
+      throw new BadRequestException(
+        `Cannot delete variant: ${activeReservations} active reservation(s) found. ` +
+          `Please wait for reservations to expire or release them first.`,
+      );
     }
 
     await this.prisma.productVariant.update({

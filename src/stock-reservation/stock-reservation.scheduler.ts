@@ -23,9 +23,10 @@ export class StockReservationScheduler {
       const result =
         await this.stockReservationService.releaseExpiredReservations();
 
-      if (result.data.count > 0) {
+      const data = result.data as { totalFound?: number };
+      if (data && data.totalFound && data.totalFound > 0) {
         this.logger.log(
-          `Released ${result.data.count} expired stock reservations`,
+          `Released ${data.totalFound} expired stock reservations`,
         );
       } else {
         this.logger.debug('No expired reservations to release');

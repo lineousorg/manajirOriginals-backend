@@ -23,7 +23,7 @@ import {
   createPaginatedResponse,
 } from '../common/dto/pagination.dto';
 import { GuestUserService } from '../guest-user/guest-user.service';
-
+import { PricingService } from '../common/services/pricing.service';
 import { randomUUID } from 'crypto';
 
 /**
@@ -61,6 +61,7 @@ export class OrderService {
     private prisma: PrismaService,
     private guestUserService: GuestUserService,
     private config: ConfigService,
+    private pricingService: PricingService,
   ) {}
 
   /**
@@ -113,7 +114,7 @@ export class OrderService {
     status: string;
     data: Order;
   }> {
-    // Validate all variants exist
+    // Validate all variants exist and are active/not deleted
     const variantIds = dto.items.map((item) => item.variantId);
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: variantIds } },
@@ -124,45 +125,39 @@ export class OrderService {
       throw new NotFoundException('One or more product variants not found');
     }
 
+    // FIX #7a: Validate variants are not deleted and are active
+    const invalidVariants = variants.filter(
+      (v) => v.isDeleted || !v.isActive,
+    );
+    if (invalidVariants.length > 0) {
+      const invalidIds = invalidVariants.map((v) => v.id).join(', ');
+      throw new BadRequestException(
+        `Cannot order from deleted or inactive variants: ${invalidIds}`,
+      );
+    }
+
     // Calculate total and create order items (outside transaction - just for pricing)
+    // Using shared PricingService for consistency
     let total = 0;
     const orderItemsData = dto.items.map((item) => {
       const variant = variants.find((v) => v.id === item.variantId)!;
 
-      // Calculate discount
-      const basePrice = Number(variant.price);
-      let finalPrice = basePrice;
-      let discountAmount = 0;
-      let discountPercentage: number | null = null;
+      // Use shared PricingService for discount calculation
+      const pricing = this.pricingService.calculateOrderItemPricing(
+        variant,
+        item.quantity,
+        item.reservationId,
+      );
 
-      // Check if discount is active
-      const now = new Date();
-      if (
-        variant.discountType &&
-        variant.discountValue &&
-        (!variant.discountStart || now >= new Date(variant.discountStart)) &&
-        (!variant.discountEnd || now <= new Date(variant.discountEnd))
-      ) {
-        const discountValue = Number(variant.discountValue);
-        if (variant.discountType === 'PERCENTAGE') {
-          discountAmount = (basePrice * discountValue) / 100;
-          discountPercentage = discountValue;
-        } else if (variant.discountType === 'FIXED') {
-          discountAmount = discountValue;
-        }
-        finalPrice = Math.max(0, basePrice - discountAmount);
-      }
-
-      const itemTotal = finalPrice * item.quantity;
-      total += itemTotal;
+      total += pricing.itemTotal;
 
       return {
         variantId: item.variantId,
         quantity: item.quantity,
-        price: finalPrice,
-        originalPrice: basePrice,
-        discountAmount: discountAmount || null,
-        discountPercentage: discountPercentage,
+        price: pricing.price,
+        originalPrice: pricing.originalPrice,
+        discountAmount: pricing.discountAmount,
+        discountPercentage: pricing.discountPercentage,
         reservationId: item.reservationId || null,
       };
     });
@@ -201,8 +196,8 @@ export class OrderService {
         }
 
         // Issue #5: Validate reservation ownership
+        // FIX #6: Removed debug console.log
         if (reservation.userId !== userId) {
-          console.log(reservation.userId, userId);
           throw new BadRequestException(
             `Reservation ${item.reservationId} does not belong to this user`,
           );
@@ -362,7 +357,7 @@ export class OrderService {
       await this.validateRecaptcha(dto.recaptchaToken);
     }
 
-    // Validate all variants exist
+    // Validate all variants exist and are active/not deleted
     const variantIds = dto.items.map((item) => item.variantId);
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: variantIds } },
@@ -373,45 +368,39 @@ export class OrderService {
       throw new NotFoundException('One or more product variants not found');
     }
 
+    // FIX #7b: Validate variants are not deleted and are active
+    const invalidVariants = variants.filter(
+      (v) => v.isDeleted || !v.isActive,
+    );
+    if (invalidVariants.length > 0) {
+      const invalidIds = invalidVariants.map((v) => v.id).join(', ');
+      throw new BadRequestException(
+        `Cannot order from deleted or inactive variants: ${invalidIds}`,
+      );
+    }
+
     // Calculate total and create order items (outside transaction - just for pricing)
+    // Using shared PricingService for consistency
     let total = 0;
     const orderItemsData = dto.items.map((item) => {
       const variant = variants.find((v) => v.id === item.variantId)!;
 
-      // Calculate discount
-      const basePrice = Number(variant.price);
-      let finalPrice = basePrice;
-      let discountAmount = 0;
-      let discountPercentage: number | null = null;
+      // Use shared PricingService for discount calculation
+      const pricing = this.pricingService.calculateOrderItemPricing(
+        variant,
+        item.quantity,
+        item.reservationId,
+      );
 
-      // Check if discount is active
-      const now = new Date();
-      if (
-        variant.discountType &&
-        variant.discountValue &&
-        (!variant.discountStart || now >= new Date(variant.discountStart)) &&
-        (!variant.discountEnd || now <= new Date(variant.discountEnd))
-      ) {
-        const discountValue = Number(variant.discountValue);
-        if (variant.discountType === 'PERCENTAGE') {
-          discountAmount = (basePrice * discountValue) / 100;
-          discountPercentage = discountValue;
-        } else if (variant.discountType === 'FIXED') {
-          discountAmount = discountValue;
-        }
-        finalPrice = Math.max(0, basePrice - discountAmount);
-      }
-
-      const itemTotal = finalPrice * item.quantity;
-      total += itemTotal;
+      total += pricing.itemTotal;
 
       return {
         variantId: item.variantId,
         quantity: item.quantity,
-        price: finalPrice,
-        originalPrice: basePrice,
-        discountAmount: discountAmount || null,
-        discountPercentage: discountPercentage,
+        price: pricing.price,
+        originalPrice: pricing.originalPrice,
+        discountAmount: pricing.discountAmount,
+        discountPercentage: pricing.discountPercentage,
         reservationId: item.reservationId || null,
       };
     });
@@ -964,18 +953,65 @@ export class OrderService {
 
         // Process each order item
         for (const item of orderItems) {
-          // If there's a reservation, release it (set status to RELEASED)
+          // FIX #3: Proper status validation before releasing reservation
           if (item.reservationId) {
-            await tx.stockReservation.updateMany({
-              where: { id: item.reservationId, status: 'USED' },
-              data: { status: 'RELEASED', updatedAt: new Date() },
+            // First, get current reservation status
+            const reservation = await tx.stockReservation.findUnique({
+              where: { id: item.reservationId },
+              select: { status: true, variantId: true, quantity: true },
             });
+
+            if (reservation) {
+              if (reservation.status === 'USED') {
+                // OK: Reservation was used in order - release it
+                await tx.stockReservation.update({
+                  where: { id: item.reservationId },
+                  data: { status: 'RELEASED', updatedAt: new Date() },
+                });
+              } else if (reservation.status === 'RELEASED' || reservation.status === 'EXPIRED') {
+                // Already released/expired - no action needed, but log for debugging
+                // eslint-disable-next-line no-console
+                console.log(
+                  `[OrderCancellation] Reservation ${item.reservationId} already ${reservation.status}, skipping`,
+                );
+              } else if (reservation.status === 'ACTIVE') {
+                // This should not happen normally - but handle gracefully
+                // Mark as RELEASED to maintain consistency
+                // eslint-disable-next-line no-console
+                console.warn(
+                  `[OrderCancellation] Reservation ${item.reservationId} is ACTIVE during cancellation - marking as RELEASED`,
+                );
+                await tx.stockReservation.update({
+                  where: { id: item.reservationId },
+                  data: { status: 'RELEASED', updatedAt: new Date() },
+                });
+              }
+            } else {
+              // Reservation doesn't exist - shouldn't happen but handle gracefully
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[OrderCancellation] Reservation ${item.reservationId} not found for order ${id}`,
+              );
+            }
           } else {
-            // No reservation: restore the stock
-            await tx.productVariant.update({
+            // No reservation: restore the stock (from guest order without reservation)
+            // FIX: Check variant exists and is not deleted before restoring
+            const variant = await tx.productVariant.findUnique({
               where: { id: item.variantId },
-              data: { stock: { increment: item.quantity } },
+              select: { id: true, isDeleted: true },
             });
+
+            if (variant && !variant.isDeleted) {
+              await tx.productVariant.update({
+                where: { id: item.variantId },
+                data: { stock: { increment: item.quantity } },
+              });
+            } else {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[OrderCancellation] Skipped stock restore for variant ${item.variantId} - variant deleted or not found`,
+              );
+            }
           }
         }
       });

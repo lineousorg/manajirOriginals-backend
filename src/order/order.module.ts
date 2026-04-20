@@ -4,9 +4,10 @@ import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { GuestUserModule } from '../guest-user/guest-user.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
-  imports: [ConfigModule, PrismaModule, GuestUserModule],
+  imports: [ConfigModule, PrismaModule, GuestUserModule, CommonModule],
   controllers: [OrderController],
   providers: [OrderService],
   exports: [OrderService],
