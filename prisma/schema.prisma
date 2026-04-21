@@ -46,8 +46,8 @@ model Category {
   slug      String     @unique
   updatedAt DateTime   @updatedAt
   isActive  Boolean    @default(true)
-  isDeleted Boolean    @default(false)
   deletedAt DateTime?
+  isDeleted Boolean    @default(false)
   parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children  Category[] @relation("CategoryHierarchy")
   images    Image[]
