@@ -1,5 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullModule } from '@nestjs/bull';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,6 +20,7 @@ import { FileModule } from './common/file.module';
 import { StockReservationModule } from './stock-reservation/stock-reservation.module';
 import { GuestUserModule } from './guest-user/guest-user.module';
 import { CommonModule } from './common/common.module';
+import { MailerModule } from './mailer/mailer.module';
 
 @Module({
   imports: [
@@ -25,6 +29,12 @@ import { CommonModule } from './common/common.module';
       serveRoot: '/public',
     }),
     ScheduleModule.forRoot(),
+    BullModule.forRoot({
+      redis: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+      },
+    }),
     PrismaModule,
     AuthModule,
     ProductModule,
@@ -38,6 +48,7 @@ import { CommonModule } from './common/common.module';
     StockReservationModule,
     GuestUserModule,
     CommonModule,
+    MailerModule,
   ],
   controllers: [AppController],
   providers: [AppService],

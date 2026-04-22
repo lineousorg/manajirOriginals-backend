@@ -8,6 +8,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +25,7 @@ import {
 } from '../common/dto/pagination.dto';
 import { GuestUserService } from '../guest-user/guest-user.service';
 import { PricingService } from '../common/services/pricing.service';
+import { MailerService } from '../mailer/mailer.service';
 import { randomUUID } from 'crypto';
 
 /**
@@ -57,11 +59,14 @@ function getDeliveryCharge(config: ConfigService, deliveryType: DeliveryType): n
 
 @Injectable()
 export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
+
   constructor(
     private prisma: PrismaService,
     private guestUserService: GuestUserService,
     private config: ConfigService,
     private pricingService: PricingService,
+    private mailerService: MailerService,
   ) {}
 
   /**
@@ -335,11 +340,63 @@ export class OrderService {
       });
     });
 
+    // Send order confirmation email (non-blocking - order succeeds even if email fails)
+    await this.sendOrderConfirmationEmail(order);
+
     return {
       message: 'Order created successfully',
       status: 'success',
       data: order,
     };
+  }
+
+  /**
+   * Send order confirmation email to customer
+   * Production-ready: Non-blocking, email failures are logged but don't affect order
+   * @param order - Order object with user/guestUser and email data
+   */
+  private async sendOrderConfirmationEmail(order: any): Promise<void> {
+    try {
+      // Get customer email and name based on order type
+      let customerEmail: string;
+      let customerName: string;
+
+
+      if (order.user) {
+        customerEmail = order.user.email;
+        customerName = 'Valued Customer'; // User model doesn't have name field
+      } else if (order.guestUser) {
+        customerEmail = order.guestUser?.email;
+        customerName = order.guestUser?.name || 'Valued Customer';
+      } else {
+        this.logger.warn(
+          `No email found for order ${order.orderNumber}. Skipping confirmation email.`,
+        );
+        return;
+      }
+
+      if (!customerEmail) {
+        this.logger.warn(
+          `No email address for order ${order.orderNumber}. Skipping confirmation email.`,
+        );
+        return;
+      }
+
+      // Queue the email for sending
+      await this.mailerService.sendOrderConfirmationEmail({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        invoiceNumber: order.invoiceNumber,
+        customerEmail,
+        customerName,
+      });
+    } catch (error) {
+      // Log error but don't throw - email is non-critical
+      this.logger.error(
+        `Failed to queue order confirmation email for order ${order.orderNumber}: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
   }
 
   /**
@@ -522,6 +579,9 @@ export class OrderService {
         },
       });
     });
+
+    // Send order confirmation email (non-blocking - order succeeds even if email fails)
+    await this.sendOrderConfirmationEmail(order);
 
     return {
       message: 'Order placed successfully',
