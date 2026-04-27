@@ -201,7 +201,6 @@ export class OrderService {
         }
 
         // Issue #5: Validate reservation ownership
-        // FIX #6: Removed debug console.log
         if (reservation.userId !== userId) {
           throw new BadRequestException(
             `Reservation ${item.reservationId} does not belong to this user`,
