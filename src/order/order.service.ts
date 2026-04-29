@@ -119,6 +119,15 @@ export class OrderService {
     status: string;
     data: Order;
   }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
     // Validate all variants exist and are active/not deleted
     const variantIds = dto.items.map((item) => item.variantId);
     const variants = await this.prisma.productVariant.findMany({
@@ -139,6 +148,52 @@ export class OrderService {
       throw new BadRequestException(
         `Cannot order from deleted or inactive variants: ${invalidIds}`,
       );
+    }
+
+    let shippingSnapshot: {
+      shippingName: string | null;
+      shippingPhone: string | null;
+      shippingAddress: string | null;
+      shippingCity: string | null;
+      shippingPostalCode: string | null;
+      shippingCountry: string | null;
+    } = {
+      shippingName: null,
+      shippingPhone: null,
+      shippingAddress: null,
+      shippingCity: null,
+      shippingPostalCode: null,
+      shippingCountry: null,
+    };
+
+    if (dto.addressId) {
+      const address = await this.prisma.address.findUnique({
+        where: { id: dto.addressId },
+        select: {
+          id: true,
+          userId: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          address: true,
+          city: true,
+          postalCode: true,
+          country: true,
+        },
+      });
+
+      if (!address || address.userId !== userId) {
+        throw new ForbiddenException('Invalid address for this user');
+      }
+
+      shippingSnapshot = {
+        shippingName: `${address.firstName} ${address.lastName}`.trim(),
+        shippingPhone: address.phone,
+        shippingAddress: address.address,
+        shippingCity: address.city || null,
+        shippingPostalCode: address.postalCode || null,
+        shippingCountry: address.country || null,
+      };
     }
 
     // Calculate total and create order items (outside transaction - just for pricing)
@@ -267,6 +322,10 @@ export class OrderService {
           addressId: dto.addressId || null,
           deliveryType,
           deliveryCharge,
+          customerName: shippingSnapshot.shippingName || 'Valued Customer',
+          customerEmail: user.email,
+          customerPhone: shippingSnapshot.shippingPhone,
+          ...shippingSnapshot,
           items: {
             create: orderItemsData,
           },
@@ -283,6 +342,15 @@ export class OrderService {
           total: true,
           deliveryType: true,
           deliveryCharge: true,
+          customerName: true,
+          customerEmail: true,
+          customerPhone: true,
+          shippingName: true,
+          shippingPhone: true,
+          shippingAddress: true,
+          shippingCity: true,
+          shippingPostalCode: true,
+          shippingCountry: true,
           createdAt: true,
           updatedAt: true,
           user: {
@@ -485,6 +553,64 @@ export class OrderService {
 
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
+      // For items with reservation: validate ownership, expiration, and status
+      const itemsWithReservation = dto.items.filter((item) => item.reservationId);
+
+      for (const item of itemsWithReservation) {
+        const reservation = await tx.stockReservation.findUnique({
+          where: { id: item.reservationId },
+        });
+
+        if (!reservation || reservation.status !== 'ACTIVE') {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} is not valid or already used`,
+          );
+        }
+
+        if (reservation.userId !== guestUser.id) {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} does not belong to this guest`,
+          );
+        }
+
+        if (new Date() > reservation.expiresAt) {
+          await tx.stockReservation.update({
+            where: { id: reservation.id },
+            data: {
+              status: 'EXPIRED',
+              updatedAt: new Date(),
+            },
+          });
+          await tx.productVariant.update({
+            where: { id: reservation.variantId },
+            data: { stock: { increment: reservation.quantity } },
+          });
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} has expired. Please reserve again.`,
+          );
+        }
+
+        if (reservation.variantId !== item.variantId) {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} does not match variant ${item.variantId}`,
+          );
+        }
+
+        if (reservation.quantity !== item.quantity) {
+          throw new BadRequestException(
+            `Reservation quantity (${reservation.quantity}) does not match order quantity (${item.quantity})`,
+          );
+        }
+
+        await tx.stockReservation.update({
+          where: { id: item.reservationId },
+          data: {
+            status: 'USED',
+            updatedAt: new Date(),
+          },
+        });
+      }
+
       // For items without reservation: decrement stock using atomic update
       const itemsWithoutReservation = dto.items.filter(
         (item) => !item.reservationId,
@@ -526,6 +652,15 @@ export class OrderService {
           addressId: null, // No saved address for guests
           deliveryType,
           deliveryCharge,
+          customerName: dto.name,
+          customerEmail: dto.email || null,
+          customerPhone: dto.phone,
+          shippingName: dto.name,
+          shippingPhone: dto.phone,
+          shippingAddress: dto.address,
+          shippingCity: dto.city || null,
+          shippingPostalCode: dto.postalCode || null,
+          shippingCountry: 'Bangladesh',
           items: {
             create: orderItemsData,
           },
@@ -542,6 +677,15 @@ export class OrderService {
           total: true,
           deliveryType: true,
           deliveryCharge: true,
+          customerName: true,
+          customerEmail: true,
+          customerPhone: true,
+          shippingName: true,
+          shippingPhone: true,
+          shippingAddress: true,
+          shippingCity: true,
+          shippingPostalCode: true,
+          shippingCountry: true,
           createdAt: true,
           updatedAt: true,
           guestUser: {
@@ -693,6 +837,15 @@ export class OrderService {
             total: true,
             deliveryType: true,
             deliveryCharge: true,
+            customerName: true,
+            customerEmail: true,
+            customerPhone: true,
+            shippingName: true,
+            shippingPhone: true,
+            shippingAddress: true,
+            shippingCity: true,
+            shippingPostalCode: true,
+            shippingCountry: true,
             createdAt: true,
             updatedAt: true,
             user: {
@@ -745,6 +898,15 @@ export class OrderService {
             total: true,
             deliveryType: true,
             deliveryCharge: true,
+            customerName: true,
+            customerEmail: true,
+            customerPhone: true,
+            shippingName: true,
+            shippingPhone: true,
+            shippingAddress: true,
+            shippingCity: true,
+            shippingPostalCode: true,
+            shippingCountry: true,
             createdAt: true,
             updatedAt: true,
             user: {
@@ -836,6 +998,15 @@ export class OrderService {
         total: true,
         deliveryType: true,
         deliveryCharge: true,
+        customerName: true,
+        customerEmail: true,
+        customerPhone: true,
+        shippingName: true,
+        shippingPhone: true,
+        shippingAddress: true,
+        shippingCity: true,
+        shippingPostalCode: true,
+        shippingCountry: true,
         createdAt: true,
         updatedAt: true,
         user: {
@@ -974,37 +1145,36 @@ export class OrderService {
     }
 
     // Validate status transition (business logic)
-    if (
-      order.status === OrderStatus.DELIVERED &&
-      dto.status !== OrderStatus.CANCELLED
-    ) {
-      throw new BadRequestException(
-        'Cannot change status of a delivered order',
-      );
-    }
-
     if (order.status === OrderStatus.CANCELLED) {
       throw new BadRequestException(
         'Cannot change status of a cancelled order',
       );
     }
 
-    const updatedOrder = await this.prisma.order.update({
-      where: { id },
-      data: { status: dto.status },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-          },
-        },
-      },
-    });
+    const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
+      [OrderStatus.PENDING]: [
+        OrderStatus.PAID,
+        OrderStatus.SHIPPED,
+        OrderStatus.CANCELLED,
+      ],
+      [OrderStatus.PAID]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
+      [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
+      [OrderStatus.DELIVERED]: [],
+      [OrderStatus.CANCELLED]: [],
+    };
 
-    // If order is cancelled, restore stock and release reservations
+    const nextAllowedStatuses = allowedTransitions[order.status];
+    if (!nextAllowedStatuses.includes(dto.status)) {
+      throw new BadRequestException(
+        `Invalid status transition from ${order.status} to ${dto.status}`,
+      );
+    }
+
+    let updatedOrder: any;
+
+    // If order is cancelled, restore stock and release reservations atomically
     if (dto.status === OrderStatus.CANCELLED) {
-      await this.prisma.$transaction(async (tx) => {
+      updatedOrder = await this.prisma.$transaction(async (tx) => {
         const orderItems = await tx.orderItem.findMany({
           where: { orderId: id },
           select: { variantId: true, quantity: true, reservationId: true },
@@ -1022,7 +1192,10 @@ export class OrderService {
 
             if (reservation) {
               if (reservation.status === 'USED') {
-                // OK: Reservation was used in order - release it
+                await tx.productVariant.update({
+                  where: { id: item.variantId },
+                  data: { stock: { increment: item.quantity } },
+                });
                 await tx.stockReservation.update({
                   where: { id: item.reservationId },
                   data: { status: 'RELEASED', updatedAt: new Date() },
@@ -1034,8 +1207,10 @@ export class OrderService {
                   `[OrderCancellation] Reservation ${item.reservationId} already ${reservation.status}, skipping`,
                 );
               } else if (reservation.status === 'ACTIVE') {
-                // This should not happen normally - but handle gracefully
-                // Mark as RELEASED to maintain consistency
+                await tx.productVariant.update({
+                  where: { id: item.variantId },
+                  data: { stock: { increment: item.quantity } },
+                });
                 // eslint-disable-next-line no-console
                 console.warn(
                   `[OrderCancellation] Reservation ${item.reservationId} is ACTIVE during cancellation - marking as RELEASED`,
@@ -1073,6 +1248,31 @@ export class OrderService {
             }
           }
         }
+        return tx.order.update({
+          where: { id },
+          data: { status: dto.status },
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+          },
+        });
+      });
+    } else {
+      updatedOrder = await this.prisma.order.update({
+        where: { id },
+        data: { status: dto.status },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+            },
+          },
+        },
       });
     }
 
@@ -1107,6 +1307,15 @@ export class OrderService {
         total: true,
         deliveryType: true,
         deliveryCharge: true,
+        customerName: true,
+        customerEmail: true,
+        customerPhone: true,
+        shippingName: true,
+        shippingPhone: true,
+        shippingAddress: true,
+        shippingCity: true,
+        shippingPostalCode: true,
+        shippingCountry: true,
         createdAt: true,
         user: {
           select: {
@@ -1186,6 +1395,37 @@ export class OrderService {
         'You do not have permission to view this order',
       );
     }
+
+    const customerEmail = order.customerEmail || order.user?.email || order.guestUser?.email || 'N/A';
+    const customerDisplayName =
+      order.customerName || order.guestUser?.name || 'Valued Customer';
+    const customerReference = order.user
+      ? `#${order.user.id}`
+      : `Guest: ${customerDisplayName}`;
+    const shippingName =
+      order.shippingName ||
+      (order.address
+        ? `${order.address.firstName} ${order.address.lastName}`.trim()
+        : order.guestUser?.name || null);
+    const shippingPhone =
+      order.shippingPhone || order.address?.phone || order.guestUser?.phone || null;
+    const shippingAddress =
+      order.shippingAddress || order.address?.address || order.guestUser?.address || null;
+    const shippingCityLine = [
+      order.shippingCity || order.address?.city || order.guestUser?.city,
+      order.shippingPostalCode ||
+        order.address?.postalCode ||
+        order.guestUser?.postalCode,
+      order.shippingCountry || order.address?.country || order.guestUser?.country,
+    ]
+      .filter(Boolean)
+      .filter(
+        (c) =>
+          c &&
+          c.toLowerCase() !== 'usa' &&
+          c.toLowerCase() !== 'united states',
+      )
+      .join(', ');
 
     // Generate PDF - Fixed Layout & Font Issues
     const pdfBuffer: Buffer = await new Promise((resolve, reject) => {
@@ -1373,32 +1613,19 @@ export class OrderService {
       doc.text('Customer ID:', 50, yPos + 42);
 
       doc.fillColor('#000000');
-      // Handle both authenticated users and guest users
-      if (order.user) {
-        const email = order.user.email;
-        const emailWidth = doc.widthOfString(email);
-        let displayEmail = email;
-        if (emailWidth > 180) {
-          while (
-            doc.widthOfString(displayEmail + '...') > 180 &&
-            displayEmail.length > 5
-          ) {
-            displayEmail = displayEmail.slice(0, -1);
-          }
-          if (displayEmail !== email) displayEmail += '...';
+      const emailWidth = doc.widthOfString(customerEmail);
+      let displayEmail = customerEmail;
+      if (emailWidth > 180) {
+        while (
+          doc.widthOfString(displayEmail + '...') > 180 &&
+          displayEmail.length > 5
+        ) {
+          displayEmail = displayEmail.slice(0, -1);
         }
-        doc.text(displayEmail, 80, yPos + 26, { width: 200 });
-        doc.text(`#${order.user.id}`, 105, yPos + 42);
-      } else if (order.guestUser) {
-        // Guest user - show their info
-        const guestEmail = order.guestUser?.email || 'N/A';
-        const guestName = order.guestUser?.name || 'Guest';
-        doc.text(guestEmail, 80, yPos + 26, { width: 200 });
-        doc.text(`Guest: ${guestName}`, 80, yPos + 42, { width: 200 });
-      } else {
-        doc.text('N/A', 80, yPos + 26);
-        doc.text('N/A', 105, yPos + 42);
+        if (displayEmail !== customerEmail) displayEmail += '...';
       }
+      doc.text(displayEmail, 80, yPos + 26, { width: 200 });
+      doc.text(customerReference, 80, yPos + 42, { width: 200 });
 
       // Shipping Address Box
       const shipX = 308;
@@ -1412,89 +1639,32 @@ export class OrderService {
         color: primaryColor,
       });
 
-      if (order.address) {
+      if (shippingAddress || shippingName || shippingPhone) {
         doc.fontSize(9).font('Helvetica');
         doc.fillColor('#000000');
 
-        const fullName = `${order.address.firstName} ${order.address.lastName}`;
-        doc.text(fullName, shipX + 10, yPos + 24, { width: 220 });
+        doc.text(shippingName || 'N/A', shipX + 10, yPos + 24, { width: 220 });
 
         doc.fillColor(secondaryColor);
         doc.text('Phone:', shipX + 10, yPos + 38);
         doc.fillColor('#000000');
-        doc.text(order.address.phone, shipX + 45, yPos + 38, { width: 190 });
+        doc.text(shippingPhone || 'N/A', shipX + 45, yPos + 38, { width: 190 });
 
         doc.fillColor(secondaryColor);
         doc.text('Address:', shipX + 10, yPos + 52);
         doc.fillColor('#000000');
 
-        // Wrap address with line break
-        const addressText = order.address.address;
-        doc.text(addressText, shipX + 10, yPos + 66, {
+        doc.text(shippingAddress || '', shipX + 10, yPos + 66, {
           width: 220,
           height: 16,
           lineBreak: true,
         });
 
-        const cityLine = [
-          order.address.city,
-          order.address.postalCode,
-          order.address.country,
-        ]
-          .filter(Boolean)
-          .filter(
-            (c) =>
-              c &&
-              c.toLowerCase() !== 'usa' &&
-              c.toLowerCase() !== 'united states',
-          )
-          .join(', ');
-
-        if (cityLine) {
-          doc.text(cityLine, shipX + 10, yPos + 76, { width: 220, height: 12 });
-        }
-      } else if (order.guestUser?.address) {
-        // Guest user address fallback
-        doc.fontSize(9).font('Helvetica');
-        doc.fillColor('#000000');
-
-        const guestName = order.guestUser?.name || 'Guest';
-        doc.text(guestName, shipX + 10, yPos + 24, { width: 220 });
-
-        doc.fillColor(secondaryColor);
-        doc.text('Phone:', shipX + 10, yPos + 38);
-        doc.fillColor('#000000');
-        doc.text(order.guestUser?.phone || 'N/A', shipX + 45, yPos + 38, {
-          width: 190,
-        });
-
-        doc.fillColor(secondaryColor);
-        doc.text('Address:', shipX + 10, yPos + 52);
-        doc.fillColor('#000000');
-
-        const addressText = order.guestUser?.address || '';
-        doc.text(addressText, shipX + 10, yPos + 66, {
-          width: 220,
-          height: 16,
-          lineBreak: true,
-        });
-
-        const cityLine = [
-          order.guestUser?.city,
-          order.guestUser?.postalCode,
-          order.guestUser?.country,
-        ]
-          .filter(Boolean)
-          .filter(
-            (c) =>
-              c &&
-              c.toLowerCase() !== 'usa' &&
-              c.toLowerCase() !== 'united states',
-          )
-          .join(', ');
-
-        if (cityLine) {
-          doc.text(cityLine, shipX + 10, yPos + 76, { width: 220, height: 12 });
+        if (shippingCityLine) {
+          doc.text(shippingCityLine, shipX + 10, yPos + 76, {
+            width: 220,
+            height: 12,
+          });
         }
       } else {
         doc.fillColor('#000000').fontSize(9);

@@ -155,6 +155,15 @@ model Order {
   invoiceNumber  String?
   orderNumber    String?
   guestUserId    Int?
+  customerName   String?
+  customerEmail  String?
+  customerPhone  String?
+  shippingName   String?
+  shippingPhone  String?
+  shippingAddress String?
+  shippingCity   String?
+  shippingPostalCode String?
+  shippingCountry String?
   address        Address?           @relation(fields: [addressId], references: [id])
   guestUser      GuestUser?         @relation(fields: [guestUserId], references: [id])
   user           User?              @relation(fields: [userId], references: [id])

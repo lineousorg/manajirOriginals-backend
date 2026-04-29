@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import PDFDocument from 'pdfkit';
@@ -82,7 +86,9 @@ export class ReceiptService {
 
       // Generate PDF
       const pdfBuffer = await this.generatePDFContent(order);
-      this.logger.log(`PDF receipt generated successfully for order ${orderId}`);
+      this.logger.log(
+        `PDF receipt generated successfully for order ${orderId}`,
+      );
 
       return pdfBuffer;
     } catch (error) {
@@ -102,6 +108,49 @@ export class ReceiptService {
   private async generatePDFContent(order: any): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
+        const customerEmail =
+          order.customerEmail ||
+          order.user?.email ||
+          order.guestUser?.email ||
+          'N/A';
+        const customerDisplayName =
+          order.customerName || order.guestUser?.name || 'Valued Customer';
+        const customerReference = order.user
+          ? `#${order.user.id}`
+          : `Guest: ${customerDisplayName}`;
+        const shippingName =
+          order.shippingName ||
+          (order.address
+            ? `${order.address.firstName} ${order.address.lastName}`.trim()
+            : order.guestUser?.name || null);
+        const shippingPhone =
+          order.shippingPhone ||
+          order.address?.phone ||
+          order.guestUser?.phone ||
+          null;
+        const shippingAddress =
+          order.shippingAddress ||
+          order.address?.address ||
+          order.guestUser?.address ||
+          null;
+        const shippingCityLine = [
+          order.shippingCity || order.address?.city || order.guestUser?.city,
+          order.shippingPostalCode ||
+            order.address?.postalCode ||
+            order.guestUser?.postalCode,
+          order.shippingCountry ||
+            order.address?.country ||
+            order.guestUser?.country,
+        ]
+          .filter(Boolean)
+          .filter(
+            (c) =>
+              c &&
+              c.toLowerCase() !== 'usa' &&
+              c.toLowerCase() !== 'united states',
+          )
+          .join(', ');
+
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         const chunks: Buffer[] = [];
 
@@ -211,8 +260,7 @@ export class ReceiptService {
           { noTruncate: true },
         );
         fitText(
-          order.invoiceNumber ||
-            `INV-${order.id.toString().padStart(6, '0')}`,
+          order.invoiceNumber || `INV-${order.id.toString().padStart(6, '0')}`,
           col1ValueX,
           yPos + lineHeight,
           valueWidth,
@@ -232,7 +280,9 @@ export class ReceiptService {
           order.status === 'PAID' || order.status === 'DELIVERED'
             ? '#38a169'
             : '#e53e3e';
-        doc.fillColor(statusColor).text(order.status, col1ValueX, yPos + lineHeight * 3);
+        doc
+          .fillColor(statusColor)
+          .text(order.status, col1ValueX, yPos + lineHeight * 3);
 
         // Column 2
         doc.fillColor(secondaryColor);
@@ -249,7 +299,9 @@ export class ReceiptService {
         );
 
         const paymentStatus =
-          order.status === 'PAID' || order.status === 'DELIVERED' ? 'PAID' : 'PENDING';
+          order.status === 'PAID' || order.status === 'DELIVERED'
+            ? 'PAID'
+            : 'PENDING';
         doc
           .fillColor(paymentStatus === 'PAID' ? '#38a169' : '#e53e3e')
           .text(paymentStatus, col2ValueX, yPos + lineHeight);
@@ -259,7 +311,9 @@ export class ReceiptService {
             ? 'Inside Dhaka'
             : 'Outside Dhaka'
           : 'Inside Dhaka';
-        doc.fillColor('#000000').text(deliveryTypeText, col2ValueX, yPos + lineHeight * 2);
+        doc
+          .fillColor('#000000')
+          .text(deliveryTypeText, col2ValueX, yPos + lineHeight * 2);
 
         yPos += 85;
 
@@ -268,7 +322,9 @@ export class ReceiptService {
         const boxHeight = 85;
 
         // Customer Details Box
-        doc.rect(40, yPos, boxWidth, boxHeight).fillAndStroke(lightBg, borderColor);
+        doc
+          .rect(40, yPos, boxWidth, boxHeight)
+          .fillAndStroke(lightBg, borderColor);
 
         fitText('CUSTOMER DETAILS', 50, yPos + 8, 200, {
           size: 10,
@@ -282,34 +338,25 @@ export class ReceiptService {
         doc.text('Customer ID:', 50, yPos + 42);
 
         doc.fillColor('#000000');
-        if (order.user) {
-          const email = order.user.email;
-          const emailWidth = doc.widthOfString(email);
-          let displayEmail = email;
-          if (emailWidth > 180) {
-            while (
-              doc.widthOfString(displayEmail + '...') > 180 &&
-              displayEmail.length > 5
-            ) {
-              displayEmail = displayEmail.slice(0, -1);
-            }
-            if (displayEmail !== email) displayEmail += '...';
+        const emailWidth = doc.widthOfString(customerEmail);
+        let displayEmail = customerEmail;
+        if (emailWidth > 180) {
+          while (
+            doc.widthOfString(displayEmail + '...') > 180 &&
+            displayEmail.length > 5
+          ) {
+            displayEmail = displayEmail.slice(0, -1);
           }
-          doc.text(displayEmail, 80, yPos + 26, { width: 200 });
-          doc.text(`#${order.user.id}`, 105, yPos + 42);
-        } else if (order.guestUser) {
-          const guestEmail = order.guestUser?.email || 'N/A';
-          const guestName = order.guestUser?.name || 'Guest';
-          doc.text(guestEmail, 80, yPos + 26, { width: 200 });
-          doc.text(`Guest: ${guestName}`, 80, yPos + 42, { width: 200 });
-        } else {
-          doc.text('N/A', 80, yPos + 26);
-          doc.text('N/A', 105, yPos + 42);
+          if (displayEmail !== customerEmail) displayEmail += '...';
         }
+        doc.text(displayEmail, 80, yPos + 26, { width: 200 });
+        doc.text(customerReference, 80, yPos + 42, { width: 200 });
 
         // Shipping Address Box
         const shipX = 308;
-        doc.rect(shipX, yPos, boxWidth, boxHeight).fillAndStroke(lightBg, borderColor);
+        doc
+          .rect(shipX, yPos, boxWidth, boxHeight)
+          .fillAndStroke(lightBg, borderColor);
 
         fitText('SHIPPING ADDRESS', shipX + 10, yPos + 8, 200, {
           size: 10,
@@ -317,57 +364,18 @@ export class ReceiptService {
           color: primaryColor,
         });
 
-        if (order.address) {
+        if (shippingAddress || shippingName || shippingPhone) {
           doc.fontSize(9).font('Helvetica');
           doc.fillColor('#000000');
 
-          const fullName = `${order.address.firstName} ${order.address.lastName}`;
-          doc.text(fullName, shipX + 10, yPos + 24, { width: 220 });
-
-          doc.fillColor(secondaryColor);
-          doc.text('Phone:', shipX + 10, yPos + 38);
-          doc.fillColor('#000000');
-          doc.text(order.address.phone, shipX + 45, yPos + 38, { width: 190 });
-
-          doc.fillColor(secondaryColor);
-          doc.text('Address:', shipX + 10, yPos + 52);
-          doc.fillColor('#000000');
-
-          const addressText = order.address.address;
-          doc.text(addressText, shipX + 10, yPos + 66, {
+          doc.text(shippingName || 'N/A', shipX + 10, yPos + 24, {
             width: 220,
-            height: 16,
-            lineBreak: true,
           });
 
-          const cityLine = [
-            order.address.city,
-            order.address.postalCode,
-            order.address.country,
-          ]
-            .filter(Boolean)
-            .filter(
-              (c) =>
-                c &&
-                c.toLowerCase() !== 'usa' &&
-                c.toLowerCase() !== 'united states',
-            )
-            .join(', ');
-
-          if (cityLine) {
-            doc.text(cityLine, shipX + 10, yPos + 76, { width: 220, height: 12 });
-          }
-        } else if (order.guestUser?.address) {
-          doc.fontSize(9).font('Helvetica');
-          doc.fillColor('#000000');
-
-          const guestName = order.guestUser?.name || 'Guest';
-          doc.text(guestName, shipX + 10, yPos + 24, { width: 220 });
-
           doc.fillColor(secondaryColor);
           doc.text('Phone:', shipX + 10, yPos + 38);
           doc.fillColor('#000000');
-          doc.text(order.guestUser?.phone || 'N/A', shipX + 45, yPos + 38, {
+          doc.text(shippingPhone || 'N/A', shipX + 45, yPos + 38, {
             width: 190,
           });
 
@@ -375,29 +383,17 @@ export class ReceiptService {
           doc.text('Address:', shipX + 10, yPos + 52);
           doc.fillColor('#000000');
 
-          const addressText = order.guestUser?.address || '';
-          doc.text(addressText, shipX + 10, yPos + 66, {
+          doc.text(shippingAddress || '', shipX + 10, yPos + 66, {
             width: 220,
             height: 16,
             lineBreak: true,
           });
 
-          const cityLine = [
-            order.guestUser?.city,
-            order.guestUser?.postalCode,
-            order.guestUser?.country,
-          ]
-            .filter(Boolean)
-            .filter(
-              (c) =>
-                c &&
-                c.toLowerCase() !== 'usa' &&
-                c.toLowerCase() !== 'united states',
-            )
-            .join(', ');
-
-          if (cityLine) {
-            doc.text(cityLine, shipX + 10, yPos + 76, { width: 220, height: 12 });
+          if (shippingCityLine) {
+            doc.text(shippingCityLine, shipX + 10, yPos + 76, {
+              width: 220,
+              height: 12,
+            });
           }
         } else {
           doc.fillColor('#000000').fontSize(9);
@@ -544,7 +540,10 @@ export class ReceiptService {
         }
 
         // Table Footer Line
-        doc.moveTo(tableX, yPos).lineTo(tableX + tableWidth, yPos).stroke(borderColor);
+        doc
+          .moveTo(tableX, yPos)
+          .lineTo(tableX + tableWidth, yPos)
+          .stroke(borderColor);
         yPos += 12;
 
         // Totals Section

@@ -202,6 +202,12 @@ export class StockReservationService {
     userId: number | null,
     guestPhone?: string,
   ) {
+    if (!userId && !guestPhone) {
+      throw new BadRequestException(
+        'Reservation release requires authentication or a guest phone number',
+      );
+    }
+
     // For guest users, find the guest user account
     let effectiveUserId = userId;
     if (!userId && guestPhone) {
@@ -214,21 +220,13 @@ export class StockReservationService {
       effectiveUserId = guestUser.id;
     }
 
-    // Allow releasing by reservationId alone for anonymous users
-    // If no userId and no guestPhone, we'll try to find by reservationId only
-
     // Use transaction to ensure atomicity
     const result = await this.prisma.$transaction(async (tx) => {
-      // Build the query based on whether we have a userId or not
-      const query: any = {
+      const query = {
         id: reservationId,
+        userId: effectiveUserId!,
         status: 'ACTIVE' as const,
       };
-
-      // Only add userId filter if we have a valid userId (not null and not -1 for anonymous)
-      if (effectiveUserId && effectiveUserId > 0) {
-        query.userId = effectiveUserId;
-      }
 
       const reservation = await tx.stockReservation.findFirst({
         where: query,
