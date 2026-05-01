@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -51,7 +50,10 @@ function generateInvoiceNumber(_productId: number): string {
 /**
  * Get delivery charge from config
  */
-function getDeliveryCharge(config: ConfigService, deliveryType: DeliveryType): number {
+function getDeliveryCharge(
+  config: ConfigService,
+  deliveryType: DeliveryType,
+): number {
   return deliveryType === DeliveryType.INSIDE_DHAKA
     ? Number(config.get('DELIVERY_CHARGE_INSIDE_DHAKA') || 120)
     : Number(config.get('DELIVERY_CHARGE_OUTSIDE_DHAKA') || 200);
@@ -140,9 +142,7 @@ export class OrderService {
     }
 
     // FIX #7a: Validate variants are not deleted and are active
-    const invalidVariants = variants.filter(
-      (v) => v.isDeleted || !v.isActive,
-    );
+    const invalidVariants = variants.filter((v) => v.isDeleted || !v.isActive);
     if (invalidVariants.length > 0) {
       const invalidIds = invalidVariants.map((v) => v.id).join(', ');
       throw new BadRequestException(
@@ -428,7 +428,6 @@ export class OrderService {
       let customerEmail: string;
       let customerName: string;
 
-
       if (order.user) {
         customerEmail = order.user.email;
         customerName = 'Valued Customer'; // User model doesn't have name field
@@ -493,9 +492,7 @@ export class OrderService {
     }
 
     // FIX #7b: Validate variants are not deleted and are active
-    const invalidVariants = variants.filter(
-      (v) => v.isDeleted || !v.isActive,
-    );
+    const invalidVariants = variants.filter((v) => v.isDeleted || !v.isActive);
     if (invalidVariants.length > 0) {
       const invalidIds = invalidVariants.map((v) => v.id).join(', ');
       throw new BadRequestException(
@@ -554,7 +551,9 @@ export class OrderService {
     // Create order in a transaction to ensure data consistency
     const order = await this.prisma.$transaction(async (tx) => {
       // For items with reservation: validate ownership, expiration, and status
-      const itemsWithReservation = dto.items.filter((item) => item.reservationId);
+      const itemsWithReservation = dto.items.filter(
+        (item) => item.reservationId,
+      );
 
       for (const item of itemsWithReservation) {
         const reservation = await tx.stockReservation.findUnique({
@@ -1200,7 +1199,10 @@ export class OrderService {
                   where: { id: item.reservationId },
                   data: { status: 'RELEASED', updatedAt: new Date() },
                 });
-              } else if (reservation.status === 'RELEASED' || reservation.status === 'EXPIRED') {
+              } else if (
+                reservation.status === 'RELEASED' ||
+                reservation.status === 'EXPIRED'
+              ) {
                 // Already released/expired - no action needed, but log for debugging
                 // eslint-disable-next-line no-console
                 console.log(
@@ -1396,7 +1398,11 @@ export class OrderService {
       );
     }
 
-    const customerEmail = order.customerEmail || order.user?.email || order.guestUser?.email || 'N/A';
+    const customerEmail =
+      order.customerEmail ||
+      order.user?.email ||
+      order.guestUser?.email ||
+      'N/A';
     const customerDisplayName =
       order.customerName || order.guestUser?.name || 'Valued Customer';
     const customerReference = order.user
@@ -1408,22 +1414,28 @@ export class OrderService {
         ? `${order.address.firstName} ${order.address.lastName}`.trim()
         : order.guestUser?.name || null);
     const shippingPhone =
-      order.shippingPhone || order.address?.phone || order.guestUser?.phone || null;
+      order.shippingPhone ||
+      order.address?.phone ||
+      order.guestUser?.phone ||
+      null;
     const shippingAddress =
-      order.shippingAddress || order.address?.address || order.guestUser?.address || null;
+      order.shippingAddress ||
+      order.address?.address ||
+      order.guestUser?.address ||
+      null;
     const shippingCityLine = [
       order.shippingCity || order.address?.city || order.guestUser?.city,
       order.shippingPostalCode ||
         order.address?.postalCode ||
         order.guestUser?.postalCode,
-      order.shippingCountry || order.address?.country || order.guestUser?.country,
+      order.shippingCountry ||
+        order.address?.country ||
+        order.guestUser?.country,
     ]
       .filter(Boolean)
       .filter(
         (c) =>
-          c &&
-          c.toLowerCase() !== 'usa' &&
-          c.toLowerCase() !== 'united states',
+          c && c.toLowerCase() !== 'usa' && c.toLowerCase() !== 'united states',
       )
       .join(', ');
 
