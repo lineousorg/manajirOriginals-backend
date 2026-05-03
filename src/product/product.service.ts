@@ -38,6 +38,39 @@ export class ProductService {
     return this.pricingService.calculateVariantPricing(variant, now);
   }
 
+  /**
+   * Get the sort order for size values
+   * Returns the index in the size order array, or 999 for unknown sizes
+   */
+  private getSizeOrder(value: string): number {
+    const sizeOrder = ['xs', 's', 'm', 'l', 'xl', '2xl', 'xxl', '3xl'];
+    const lowerValue = value.toLowerCase();
+    const index = sizeOrder.indexOf(lowerValue);
+    return index === -1 ? 999 : index;
+  }
+
+  /**
+   * Sort variants by size attribute if present
+   * Maintains correct order: xs, s, m, l, xl, 2xl, etc.
+   */
+  private sortVariantsBySize(variants: any[]): any[] {
+    return [...variants].sort((a, b) => {
+      const sizeA = a.attributes?.find(
+        (attr: any) =>
+          attr.attributeValue?.attribute?.name?.toLowerCase() === 'size',
+      )?.attributeValue?.value;
+      const sizeB = b.attributes?.find(
+        (attr: any) =>
+          attr.attributeValue?.attribute?.name?.toLowerCase() === 'size',
+      )?.attributeValue?.value;
+
+      if (sizeA && sizeB) {
+        return this.getSizeOrder(sizeA) - this.getSizeOrder(sizeB);
+      }
+      return 0;
+    });
+  }
+
   async create(dto: CreateProductDto) {
     // Check if slug already exists
     const existingProduct = await this.prisma.product.findUnique({
@@ -549,12 +582,15 @@ export class ProductService {
       };
     });
 
+    // Sort variants by size if they have size attributes
+    const sortedVariants = this.sortVariantsBySize(variantsWithAvailableStock);
+
     return {
       message: 'Product found',
       status: 'success',
       data: {
         ...product,
-        variants: variantsWithAvailableStock,
+        variants: sortedVariants,
       },
     };
   }
