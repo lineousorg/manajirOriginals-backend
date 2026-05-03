@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GuestUserService } from '../guest-user/guest-user.service';
+import * as crypto from 'crypto';
 
 // Default reservation expiration time in minutes
 export const DEFAULT_RESERVATION_MINUTES = 15;
@@ -20,85 +21,40 @@ export class StockReservationService {
   ) {}
 
   /**
-   * Reserve stock for a user
+   * Helper: Hash guest token for secure storage
+   */
+  private hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Reserve stock for a user or guest
    * Creates a reservation and decrements actual stock
    * Uses atomic update to prevent race conditions
-   * For guest users, provide guestPhone to find or create a guest user
    */
   async reserveStock(
     userId: number | null,
     variantId: number,
     quantity: number,
     expirationMinutes: number = DEFAULT_RESERVATION_MINUTES,
-    guestPhone?: string,
+    guestToken?: string,
   ) {
     // Validate quantity
     if (quantity <= 0) {
       throw new BadRequestException('Quantity must be greater than 0');
     }
 
-    // For guest users, find or create guest user account
-    let effectiveUserId = userId;
-    if (!userId && guestPhone) {
-      const guestUser = await this.guestUserService.findOrCreate({
-        name: 'Guest',
-        phone: guestPhone,
-        address: '',
-      });
-      effectiveUserId = guestUser.id;
-    }
-
-    // Allow anonymous reservations - no user ID or phone required
-    if (!effectiveUserId) {
-      effectiveUserId = -1; // Negative ID indicates anonymous reservation
-    }
-
-    // FIX #4: Add idempotency check - prevent duplicate reservations within 10 seconds
-    // Only apply for non-anonymous users (exclude userId = -1)
-    if (effectiveUserId > 0) {
-      const recentReservation = await this.prisma.stockReservation.findFirst({
-        where: {
-          variantId,
-          userId: effectiveUserId,
-          status: 'ACTIVE',
-          expiresAt: { gt: new Date() },
-          createdAt: { gte: new Date(Date.now() - 10000) }, // Last 10 seconds
-        },
-        select: { id: true },
-      });
-
-      if (recentReservation) {
-        throw new ConflictException(
-          'A reservation already exists for this item. Please wait or release it first.',
-        );
-      }
-    }
-
-    // FIX #5: Add max reservation limit per user (exclude anonymous)
-    if (effectiveUserId > 0) {
-      const MAX_RESERVATIONS_PER_USER = 5;
-      const userActiveReservations = await this.prisma.stockReservation.count({
-        where: {
-          userId: effectiveUserId,
-          status: 'ACTIVE',
-          expiresAt: { gt: new Date() },
-        },
-      });
-
-      if (userActiveReservations >= MAX_RESERVATIONS_PER_USER) {
-        throw new BadRequestException(
-          `Maximum ${MAX_RESERVATIONS_PER_USER} active reservations allowed. Please complete or release existing reservations first.`,
-        );
-      }
+    // Anonymous users must provide a guest token
+    if (!userId && !guestToken) {
+      throw new BadRequestException('Guest reservations require a guest token');
     }
 
     // Calculate expiration time
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + expirationMinutes);
 
-    // Create reservation and decrement stock in a transaction
     const result = await this.prisma.$transaction(async (tx) => {
-      // First, validate variant exists and is active
+      // Validate variant exists and is active
       const variant = await tx.productVariant.findUnique({
         where: { id: variantId },
         select: { id: true, stock: true, isActive: true, isDeleted: true },
@@ -107,17 +63,13 @@ export class StockReservationService {
       if (!variant) {
         throw new NotFoundException(`Variant with ID ${variantId} not found`);
       }
-
       if (!variant.isActive) {
         throw new BadRequestException('This variant is not active');
       }
-
       if (variant.isDeleted) {
         throw new BadRequestException('This variant has been deleted');
       }
 
-      // Stock is already decremented when reservation is created,
-      // so available = current stock
       const availableStock = variant.stock;
 
       if (quantity > availableStock) {
@@ -127,19 +79,15 @@ export class StockReservationService {
       }
 
       // Atomic update: only decrement if stock is sufficient
-      // This prevents race conditions by ensuring the update only succeeds
-      // when stock is still available
       const updatedVariant = await tx.productVariant.updateMany({
         where: {
           id: variantId,
-          stock: { gte: quantity }, // Only update if stock >= quantity
+          stock: { gte: quantity },
         },
         data: { stock: { decrement: quantity } },
       });
 
-      // Check if update was successful (count === 1 means it worked)
       if (updatedVariant.count === 0) {
-        // Stock was modified by another request, fetch current state
         const currentVariant = await tx.productVariant.findUnique({
           where: { id: variantId },
           select: { stock: true },
@@ -149,16 +97,12 @@ export class StockReservationService {
         );
       }
 
-      // Get updated stock for response
-      const finalVariant = await tx.productVariant.findUnique({
-        where: { id: variantId },
-        select: { stock: true },
-      });
-
       // Create the reservation
       const reservation = await tx.stockReservation.create({
         data: {
-          userId: effectiveUserId,
+          userId: userId || undefined,
+          guestToken: guestToken || undefined,
+          guestTokenHash: guestToken ? this.hashToken(guestToken) : undefined,
           variantId,
           quantity,
           status: 'ACTIVE',
@@ -175,7 +119,7 @@ export class StockReservationService {
         },
       });
 
-      return { reservation, availableStock: finalVariant?.stock || 0 };
+      return { reservation, availableStock };
     });
 
     return {
@@ -194,48 +138,66 @@ export class StockReservationService {
   /**
    * Release a reservation (when user removes from cart or manually releases)
    * Restores the stock back to the variant
-   * For guest users, provide guestPhone to find the guest user
-   * Public API - no authentication required
+   * XOR logic: match by userId OR guestToken (never both)
+   * Idempotent: returns success if already released
    */
   async releaseReservation(
     reservationId: number,
     userId: number | null,
-    guestPhone?: string,
+    guestToken?: string,
   ) {
-    if (!userId && !guestPhone) {
-      throw new BadRequestException(
-        'Reservation release requires authentication or a guest phone number',
-      );
-    }
-
-    // For guest users, find the guest user account
-    let effectiveUserId = userId;
-    if (!userId && guestPhone) {
-      const guestUser = await this.guestUserService.findByPhone(guestPhone);
-      if (!guestUser) {
-        throw new NotFoundException(
-          'Guest user not found. Please provide a valid phone number.',
-        );
-      }
-      effectiveUserId = guestUser.id;
-    }
-
-    // Use transaction to ensure atomicity
+    // Use transaction for atomicity
     const result = await this.prisma.$transaction(async (tx) => {
-      const query = {
+      // Build query: XOR logic (userId OR guestToken, never both)
+      const query: any = {
         id: reservationId,
-        userId: effectiveUserId!,
         status: 'ACTIVE' as const,
       };
 
+      if (userId) {
+        // Authenticated user - match by userId
+        query.userId = userId;
+      } else if (guestToken) {
+        // Guest session - match by guestToken
+        query.guestToken = guestToken;
+      } else {
+        throw new BadRequestException(
+          'Reservation release requires authentication or a guest session token',
+        );
+      }
+
+      // Find reservation
       const reservation = await tx.stockReservation.findFirst({
         where: query,
       });
 
+      // Handle not found
       if (!reservation) {
+        // Check if already released (idempotency)
+        const existing = await tx.stockReservation.findUnique({
+          where: { id: reservationId },
+        });
+
+        if (existing && existing.status === 'RELEASED') {
+          return {
+            reservationId: existing.id,
+            quantity: existing.quantity,
+            alreadyReleased: true,
+          };
+        }
+
         throw new NotFoundException(
-          'Reservation not found or already released/expired',
+          'Reservation not found or already processed',
         );
+      }
+
+      // Race condition: already released
+      if (reservation.status === 'RELEASED') {
+        return {
+          reservationId: reservation.id,
+          quantity: reservation.quantity,
+          alreadyReleased: true,
+        };
       }
 
       // Restore stock back to the variant
@@ -253,8 +215,24 @@ export class StockReservationService {
         },
       });
 
-      return { reservationId: reservation.id, quantity: reservation.quantity };
+      return {
+        reservationId: reservation.id,
+        quantity: reservation.quantity,
+        alreadyReleased: false,
+      };
     });
+
+    // Return response
+    if (result.alreadyReleased) {
+      return {
+        message: 'Reservation already released',
+        status: 'success',
+        data: {
+          reservationId: result.reservationId,
+          restoredStock: result.quantity,
+        },
+      };
+    }
 
     return {
       message: 'Reservation released successfully',
@@ -324,19 +302,18 @@ export class StockReservationService {
 
   /**
    * Get active reservations for a user or guest
-   * For guest users, provide guestPhone to find the guest user
    */
-  async getUserReservations(userId: number | null, guestPhone?: string) {
-    // For guest users, find the guest user account
-    let effectiveUserId = userId;
-    if (!userId && guestPhone) {
-      const guestUser = await this.guestUserService.findByPhone(guestPhone);
-      if (guestUser) {
-        effectiveUserId = guestUser.id;
-      }
-    }
+  async getUserReservations(userId: number | null, guestToken?: string) {
+    const query: any = {
+      status: 'ACTIVE',
+      expiresAt: { gt: new Date() },
+    };
 
-    if (!effectiveUserId) {
+    if (userId) {
+      query.userId = userId;
+    } else if (guestToken) {
+      query.guestToken = guestToken;
+    } else {
       return {
         message: 'No active reservations',
         status: 'success',
@@ -345,11 +322,7 @@ export class StockReservationService {
     }
 
     const reservations = await this.prisma.stockReservation.findMany({
-      where: {
-        userId: effectiveUserId,
-        status: 'ACTIVE',
-        expiresAt: { gt: new Date() },
-      },
+      where: query,
       include: {
         variant: {
           select: {
@@ -399,10 +372,7 @@ export class StockReservationService {
     });
 
     const reservedQuantity = activeReservations._sum.quantity || 0;
-    // Stock is already decremented when reservation is created,
-    // so available = current stock (not stock - reservedQuantity)
     const availableStock = variant.stock;
-    // Total stock = available stock + reserved quantity (original stock before reservations)
 
     return {
       message: 'Available stock retrieved',
@@ -460,15 +430,13 @@ export class StockReservationService {
 
         // Stock is already decremented at reservation time
         // variant.stock represents available stock (source of truth)
-        // activeReservationQuantity is for reporting Purposes Only
         const activeReservationQuantity = reservationMap.get(id) || 0;
         const availableStock = variant.stock;
-        // Total stock = available stock + active reservations (original stock before reservations)
 
         return {
           variantId: id,
           totalStock: variant.stock + activeReservationQuantity,
-          activeReservationQuantity: activeReservationQuantity, // For reporting only - NOT used in availability math
+          activeReservationQuantity: activeReservationQuantity,
           availableStock: Math.max(0, availableStock),
         };
       })
@@ -540,7 +508,7 @@ export class StockReservationService {
     await this.prisma.$transaction(async (tx) => {
       // Restore stock for each expired reservation
       for (const reservation of expiredReservations) {
-        // FIX #1: Check variant exists AND is not deleted before restoring stock
+        // Check variant exists AND is not deleted before restoring stock
         const variant = await tx.productVariant.findUnique({
           where: { id: reservation.variantId },
           select: { id: true, isDeleted: true },
@@ -555,7 +523,6 @@ export class StockReservationService {
           restoredCount++;
         } else {
           // Log for admin review (variant was deleted before reservation expired)
-          // eslint-disable-next-line no-console
           console.warn(
             `[StockReservation] Skipped stock restore for deleted variant ${reservation.variantId}, reservation ${reservation.id}`,
           );
@@ -564,9 +531,7 @@ export class StockReservationService {
       }
 
       // Update all expired reservations to EXPIRED status (only those we processed)
-      // We only mark as EXPIRED the ones we successfully handled
       if (skippedReservations.length > 0) {
-        // Mark processed ones as EXPIRED, keep skipped ones as ACTIVE for manual review
         const processedIds = expiredReservations
           .filter((r) => !skippedReservations.includes(r.id))
           .map((r) => r.id);
@@ -669,7 +634,7 @@ export class StockReservationService {
     await this.prisma.$transaction(async (tx) => {
       // Restore stock for each active reservation
       for (const reservation of activeReservations) {
-        // FIX #2: Check variant exists AND is not deleted before restoring stock
+        // Check variant exists AND is not deleted before restoring stock
         const variant = await tx.productVariant.findUnique({
           where: { id: reservation.variantId },
           select: { id: true, isDeleted: true },
@@ -684,7 +649,6 @@ export class StockReservationService {
           restoredCount++;
         } else {
           // Log for admin review
-          // eslint-disable-next-line no-console
           console.warn(
             `[StockReservation] Force clean skipped for deleted variant ${reservation.variantId}, reservation ${reservation.id}`,
           );

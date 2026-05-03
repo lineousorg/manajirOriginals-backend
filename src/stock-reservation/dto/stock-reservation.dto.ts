@@ -24,6 +24,14 @@ export class ReserveStockDto {
   @IsOptional()
   @IsString()
   guestPhone?: string;
+
+  /**
+   * Guest session token - used for anonymous users to track reservations
+   * Generated on first visit and stored in cookie/localStorage
+   */
+  @IsOptional()
+  @IsString()
+  guestToken?: string;
 }
 
 export class ReleaseReservationDto {
@@ -32,11 +40,11 @@ export class ReleaseReservationDto {
   reservationId!: number;
 
   /**
-   * Guest phone number - used for guest users to release their reservations
+   * Guest session token - used for anonymous users to release their reservations
    */
   @IsOptional()
   @IsString()
-  guestPhone?: string;
+  guestToken?: string;
 }
 
 export class CheckAvailabilityDto {

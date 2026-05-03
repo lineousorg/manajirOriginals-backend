@@ -1,5 +1,3 @@
-# API Documentation
-
 ## Base URL
 ```
 http://localhost:5000/api
@@ -49,21 +47,26 @@ Create a new user account.
 **Success Response (201):**
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
+  "message": "User created successfully",
+  "status": "success",
+  "data": {
     "id": 1,
     "email": "user@example.com",
-    "role": "CUSTOMER"
+    "role": "CUSTOMER",
+    "createdAt": "2026-03-31T20:08:35.000Z",
+    "updatedAt": "2026-03-31T20:08:35.000Z"
   }
 }
 ```
 
----
+**Error Responses:**
+- `400`: Invalid email or password format
+- `409`: Email already exists
 
-### Customer Login
-Authenticate as a customer.
+### Sign In
+Authenticate and receive JWT token.
 
-**Endpoint:** `POST /api/auth/login`
+**Endpoint:** `POST /api/auth/signin`
 
 **Access:** Public
 
@@ -78,1319 +81,22 @@ Authenticate as a customer.
 **Success Response (200):**
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "role": "CUSTOMER"
-  }
-}
-```
-
----
-
-### Admin Login
-Authenticate as an administrator.
-
-**Endpoint:** `POST /api/auth/admin/login`
-
-**Access:** Public
-
-**Request Body:**
-```json
-{
-  "email": "admin@example.com",
-  "password": "AdminPassword123"
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": 1,
-    "email": "admin@example.com",
-    "role": "ADMIN"
-  }
-}
-```
-
----
-
-## Users
-
-All user endpoints require authentication. Include the JWT token in the Authorization header:
-```
-Authorization: Bearer <your_token>
-```
-
-### Create User
-Create a new user (Admin only).
-
-**Endpoint:** `POST /api/users`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Request Body:**
-```json
-{
-  "email": "newuser@example.com",
-  "password": "Password123",
-  "role": "CUSTOMER"
-}
-```
-
-**Success Response (201):**
-```json
-{
-  "id": 2,
-  "email": "newuser@example.com",
-  "role": "CUSTOMER",
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Get All Users
-Retrieve all users (Admin only).
-
-**Endpoint:** `GET /api/users`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Success Response (200):**
-```json
-[
-  {
-    "id": 1,
-    "email": "admin@example.com",
-    "role": "ADMIN",
-    "createdAt": "2026-02-17T06:00:00.000Z",
-    "updatedAt": "2026-02-17T06:00:00.000Z"
-  },
-  {
-    "id": 2,
-    "email": "user@example.com",
-    "role": "CUSTOMER",
-    "createdAt": "2026-02-17T06:00:00.000Z",
-    "updatedAt": "2026-02-17T06:00:00.000Z"
-  }
-]
-```
-
----
-
-### Get User by ID
-Retrieve a specific user. Users can view their own profile, admins can view any.
-
-**Endpoint:** `GET /api/users/:id`
-
-**Access:** Authenticated (own profile) or Admin (any profile)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "email": "user@example.com",
-  "role": "CUSTOMER",
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Update User
-Update user information. Users can update their own profile, admins can update any.
-
-**Endpoint:** `PATCH /api/users/:id`
-
-**Access:** Authenticated (own profile) or Admin (any profile)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Request Body:**
-```json
-{
-  "email": "newemail@example.com",
-  "password": "NewPassword123"
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "email": "newemail@example.com",
-  "role": "CUSTOMER",
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:15:00.000Z"
-}
-```
-
----
-
-### Delete User
-Delete a user (Admin only).
-
-**Endpoint:** `DELETE /api/users/:id`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Success Response (200):**
-```json
-{
-  "message": "User deleted successfully"
-}
-```
-
----
-
-## Products
-
-### Get All Products
-Retrieve all active products with their variants and images.
-
-**Endpoint:** `GET /api/products`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-[
-  {
-    "id": 1,
-    "name": "Classic T-Shirt",
-    "slug": "classic-t-shirt",
-    "description": "Comfortable cotton t-shirt",
-    "brand": "Fashion Brand",
-    "isActive": true,
-    "categoryId": 1,
-    "category": {
+  "message": "Login successful",
+  "status": "success",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
       "id": 1,
-      "name": "T-Shirts",
-      "slug": "t-shirts"
-    },
-    "variants": [
-      {
-        "id": 1,
-        "sku": "TS-001-S-BLK",
-        "price": "29.99",
-        "stock": 50,
-        "attributes": [
-          {
-            "attributeValue": {
-              "id": 1,
-              "value": "Small",
-              "attribute": {
-                "id": 1,
-                "name": "Size"
-              }
-            }
-          },
-          {
-            "attributeValue": {
-              "id": 5,
-              "value": "Black",
-              "attribute": {
-                "id": 2,
-                "name": "Color"
-              }
-            }
-          }
-        ],
-        "images": []
-      }
-    ],
-    "images": [
-      {
-        "id": 1,
-        "url": "https://example.com/image.jpg",
-        "altText": "Classic T-Shirt",
-        "position": 1,
-        "type": "PRODUCT"
-      }
-    ],
-    "createdAt": "2026-02-17T06:00:00.000Z",
-    "updatedAt": "2026-02-17T06:00:00.000Z"
+      "email": "user@example.com",
+      "role": "CUSTOMER"
+    }
   }
-]
-```
-
----
-
-### Get Product by ID
-Retrieve a specific product with all details.
-
-**Endpoint:** `GET /api/products/:id`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "name": "Classic T-Shirt",
-  "slug": "classic-t-shirt",
-  "description": "Comfortable cotton t-shirt",
-  "brand": "Fashion Brand",
-  "isActive": true,
-  "categoryId": 1,
-  "category": {
-    "id": 1,
-    "name": "T-Shirts",
-    "slug": "t-shirts"
-  },
-  "variants": [
-    {
-      "id": 1,
-      "sku": "TS-001-S-BLK",
-      "price": "29.99",
-      "stock": 50,
-      "attributes": [
-        {
-          "attributeValue": {
-            "id": 1,
-            "value": "Small",
-            "attribute": {
-              "id": 1,
-              "name": "Size"
-            }
-          }
-        }
-      ]
-    }
-  ],
-  "images": [],
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
 }
-```
-
----
-
-### Create Product
-Create a new product with variants and attributes (Admin only).
-
-**Endpoint:** `POST /api/products`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Request Body:**
-```json
-{
-  "name": "Classic T-Shirt",
-  "slug": "classic-t-shirt",
-  "description": "Comfortable cotton t-shirt",
-  "categoryId": 1,
-  "isActive": true,
-  "variants": [
-    {
-      "sku": "TS-001-S-BLK",
-      "price": 29.99,
-      "stock": 50,
-      "attributes": [
-        {
-          "attributeName": "Size",
-          "attributeValue": "Small"
-        },
-        {
-          "attributeName": "Color",
-          "attributeValue": "Black"
-        }
-      ]
-    }
-  ],
-  "images": [
-    {
-      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
-      "altText": "Classic T-Shirt",
-      "position": 1
-    }
-  ]
-}
-```
-
-**Success Response (201):**
-```json
-{
-  "id": 1,
-  "name": "Classic T-Shirt",
-  "slug": "classic-t-shirt",
-  "description": "Comfortable cotton t-shirt",
-  "brand": null,
-  "isActive": true,
-  "categoryId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Update Product
-Update an existing product (Admin only).
-
-**Endpoint:** `PATCH /api/products/:id`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Request Body:**
-```json
-{
-  "name": "Updated T-Shirt Name",
-  "description": "Updated description",
-  "isActive": false
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "name": "Updated T-Shirt Name",
-  "slug": "classic-t-shirt",
-  "description": "Updated description",
-  "brand": null,
-  "isActive": false,
-  "categoryId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:15:00.000Z"
-}
-```
-
----
-
-### Delete Product
-Delete a product (Admin only).
-
-**Endpoint:** `DELETE /api/products/:id`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Success Response (200):**
-```json
-{
-  "message": "Product deleted successfully"
-}
-```
-
----
-
-## Categories
-
-### Get All Categories
-Retrieve all categories with their hierarchy.
-
-**Endpoint:** `GET /api/categories`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-[
-  {
-    "id": 1,
-    "name": "Clothing",
-    "slug": "clothing",
-    "parentId": null,
-    "children": [
-      {
-        "id": 2,
-        "name": "T-Shirts",
-        "slug": "t-shirts",
-        "parentId": 1
-      },
-      {
-        "id": 3,
-        "name": "Jeans",
-        "slug": "jeans",
-        "parentId": 1
-      }
-    ],
-    "createdAt": "2026-02-17T06:00:00.000Z",
-    "updatedAt": "2026-02-17T06:00:00.000Z"
-  }
-]
-```
-
----
-
-### Get Category by ID
-Retrieve a specific category with its products.
-
-**Endpoint:** `GET /api/categories/:id`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "name": "Clothing",
-  "slug": "clothing",
-  "parentId": null,
-  "products": [
-    {
-      "id": 1,
-      "name": "Classic T-Shirt",
-      "slug": "classic-t-shirt",
-      "description": "Comfortable cotton t-shirt",
-      "isActive": true
-    }
-  ],
-  "children": [],
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Create Category
-Create a new category (Admin only).
-
-**Endpoint:** `POST /api/categories`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Request Body:**
-```json
-{
-  "name": "T-Shirts",
-  "slug": "t-shirts",
-  "parentId": 1
-}
-```
-
-**Success Response (201):**
-```json
-{
-  "id": 2,
-  "name": "T-Shirts",
-  "slug": "t-shirts",
-  "parentId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Delete Category
-Delete a category (Admin only).
-
-**Endpoint:** `DELETE /api/categories/:id`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Success Response (200):**
-```json
-{
-  "message": "Category deleted successfully"
-}
-```
-
----
-
-## Orders
-
-All order endpoints require authentication.
-
-### Create Order
-Create a new order.
-
-**Endpoint:** `POST /api/orders`
-
-**Access:** Authenticated users
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Request Body:**
-```json
-{
-  "items": [
-    {
-      "variantId": 1,
-      "quantity": 2
-    },
-    {
-      "variantId": 3,
-      "quantity": 1
-    }
-  ],
-  "paymentMethod": "CASH_ON_DELIVERY"
-}
-```
-
-**Payment Methods:**
-- `CASH_ON_DELIVERY`
-- `ONLINE`
-- `STRIPE`
-- `SSLCOMMERZ`
-
-**Success Response (201):**
-```json
-{
-  "id": 1,
-  "userId": 1,
-  "status": "PENDING",
-  "paymentMethod": "CASH_ON_DELIVERY",
-  "total": "89.97",
-  "items": [
-    {
-      "id": 1,
-      "variantId": 1,
-      "quantity": 2,
-      "price": "29.99",
-      "variant": {
-        "id": 1,
-        "sku": "TS-001-S-BLK",
-        "product": {
-          "id": 1,
-          "name": "Classic T-Shirt"
-        }
-      }
-    }
-  ],
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Get All Orders
-Retrieve orders. Admins see all orders, customers see only their own.
-
-**Endpoint:** `GET /api/orders`
-
-**Access:** Authenticated users
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-[
-  {
-    "id": 1,
-    "userId": 1,
-    "status": "PENDING",
-    "paymentMethod": "CASH_ON_DELIVERY",
-    "total": "89.97",
-    "items": [
-      {
-        "id": 1,
-        "variantId": 1,
-        "quantity": 2,
-        "price": "29.99"
-      }
-    ],
-    "createdAt": "2026-02-17T06:00:00.000Z",
-    "updatedAt": "2026-02-17T06:00:00.000Z"
-  }
-]
-```
-
----
-
-### Get Order by ID
-Retrieve a specific order. Admins can view any order, customers can view only their own.
-
-**Endpoint:** `GET /api/orders/:id`
-
-**Access:** Authenticated users (own orders) or Admin (any order)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "userId": 1,
-  "status": "PENDING",
-  "paymentMethod": "CASH_ON_DELIVERY",
-  "total": "89.97",
-  "items": [
-    {
-      "id": 1,
-      "variantId": 1,
-      "quantity": 2,
-      "price": "29.99",
-      "variant": {
-        "id": 1,
-        "sku": "TS-001-S-BLK",
-        "product": {
-          "id": 1,
-          "name": "Classic T-Shirt"
-        }
-      }
-    }
-  ],
-  "user": {
-    "id": 1,
-    "email": "user@example.com"
-  },
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Update Order Status
-Update the status of an order (Admin only).
-
-**Endpoint:** `PATCH /api/orders/:id/status`
-
-**Access:** Admin only
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Request Body:**
-```json
-{
-  "status": "SHIPPED"
-}
-```
-
-**Order Status Values:**
-- `PENDING` - Order placed, awaiting payment
-- `PAID` - Payment received
-- `SHIPPED` - Order shipped
-- `DELIVERED` - Order delivered to customer
-- `CANCELLED` - Order cancelled
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "userId": 1,
-  "status": "SHIPPED",
-  "paymentMethod": "CASH_ON_DELIVERY",
-  "total": "89.97",
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:15:00.000Z"
-}
-```
-
----
-
-### Download Order Receipt
-Download a PDF receipt for an order. Admins can download any order receipt, customers can download only their own.
-
-**Endpoint:** `GET /api/orders/:id/receipt`
-
-**Access:** Authenticated users (own orders) or Admin (any order)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-Returns a PDF file with the following headers:
-```
-Content-Type: application/pdf
-Content-Disposition: attachment; filename="receipt-1.pdf"
-Content-Length: <file size in bytes>
 ```
 
 **Error Responses:**
-- 401 Unauthorized - If not authenticated
-- 403 Forbidden - If trying to access another user's order
-- 404 Not Found - If order doesn't exist
-
----
-
-## Addresses
-
-All address endpoints require authentication.
-
-### Create Address
-Create a new address for the authenticated user.
-
-**Endpoint:** `POST /api/addresses`
-
-**Access:** Authenticated users
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Request Body:**
-```json
-{
-  "firstName": "John",
-  "lastName": "Doe",
-  "phone": "+1234567890",
-  "address": "123 Main Street, Apt 4B",
-  "city": "New York",
-  "postalCode": "10001",
-  "country": "USA",
-  "isDefault": true
-}
-```
-
-**Success Response (201):**
-```json
-{
-  "id": 1,
-  "firstName": "John",
-  "lastName": "Doe",
-  "phone": "+1234567890",
-  "address": "123 Main Street, Apt 4B",
-  "city": "New York",
-  "postalCode": "10001",
-  "country": "USA",
-  "isDefault": true,
-  "userId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Get All Addresses
-Retrieve all addresses for the authenticated user.
-
-**Endpoint:** `GET /api/addresses`
-
-**Access:** Authenticated users
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-[
-  {
-    "id": 1,
-    "firstName": "John",
-    "lastName": "Doe",
-    "phone": "+1234567890",
-    "address": "123 Main Street, Apt 4B",
-    "city": "New York",
-    "postalCode": "10001",
-    "country": "USA",
-    "isDefault": true,
-    "userId": 1,
-    "createdAt": "2026-02-17T06:00:00.000Z",
-    "updatedAt": "2026-02-17T06:00:00.000Z"
-  }
-]
-```
-
----
-
-### Get Address by ID
-Retrieve a specific address (owner only).
-
-**Endpoint:** `GET /api/addresses/:id`
-
-**Access:** Authenticated users (own addresses only)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "firstName": "John",
-  "lastName": "Doe",
-  "phone": "+1234567890",
-  "address": "123 Main Street, Apt 4B",
-  "city": "New York",
-  "postalCode": "10001",
-  "country": "USA",
-  "isDefault": true,
-  "userId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:00:00.000Z"
-}
-```
-
----
-
-### Update Address
-Update an existing address (owner only).
-
-**Endpoint:** `PATCH /api/addresses/:id`
-
-**Access:** Authenticated users (own addresses only)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Request Body:**
-```json
-{
-  "phone": "+0987654321",
-  "city": "Los Angeles",
-  "postalCode": "90001"
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "firstName": "John",
-  "lastName": "Doe",
-  "phone": "+0987654321",
-  "address": "123 Main Street, Apt 4B",
-  "city": "Los Angeles",
-  "postalCode": "90001",
-  "country": "USA",
-  "isDefault": true,
-  "userId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:15:00.000Z"
-}
-```
-
----
-
-### Delete Address
-Delete an address (owner only).
-
-**Endpoint:** `DELETE /api/addresses/:id`
-
-**Access:** Authenticated users (own addresses only)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-{
-  "message": "Address deleted successfully"
-}
-```
-
----
-
-### Set Default Address
-Set an address as the default address (owner only).
-
-**Endpoint:** `PATCH /api/addresses/:id/set-default`
-
-**Access:** Authenticated users (own addresses only)
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Success Response (200):**
-```json
-{
-  "id": 1,
-  "firstName": "John",
-  "lastName": "Doe",
-  "phone": "+1234567890",
-  "address": "123 Main Street, Apt 4B",
-  "city": "New York",
-  "postalCode": "10001",
-  "country": "USA",
-  "isDefault": true,
-  "userId": 1,
-  "createdAt": "2026-02-17T06:00:00.000Z",
-  "updatedAt": "2026-02-17T06:15:00.000Z"
-}
-```
-
----
-
-## Attributes
-
-All attribute endpoints are public. Attributes define types of product characteristics (e.g., "Color", "Size", "Material").
-
-### Create Attribute
-Create a new attribute.
-
-**Endpoint:** `POST /api/attributes`
-
-**Access:** Public
-
-**Request Body:**
-```json
-{
-  "name": "Color"
-}
-```
-
-**Validation Rules:**
-- `name`: Required, must be unique
-
-**Success Response (201):**
-```json
-{
-  "message": "Attribute created successfully",
-  "status": "success",
-  "data": {
-    "id": 1,
-    "name": "Color"
-  }
-}
-```
-
----
-
-### Get All Attributes
-Retrieve all attributes.
-
-**Endpoint:** `GET /api/attributes`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attributes retrieved successfully",
-  "status": "success",
-  "data": [
-    {
-      "id": 1,
-      "name": "Color"
-    },
-    {
-      "id": 2,
-      "name": "Size"
-    }
-  ]
-}
-```
-
----
-
-### Get Attribute by ID
-Retrieve a specific attribute with its values.
-
-**Endpoint:** `GET /api/attributes/:id`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute retrieved successfully",
-  "status": "success",
-  "data": {
-    "id": 1,
-    "name": "Color",
-    "values": [
-      {
-        "id": 1,
-        "value": "Red",
-        "attributeId": 1
-      },
-      {
-        "id": 2,
-        "value": "Blue",
-        "attributeId": 1
-      }
-    ]
-  }
-}
-```
-
----
-
-### Update Attribute
-Update an existing attribute.
-
-**Endpoint:** `PATCH /api/attributes/:id`
-
-**Access:** Public
-
-**Request Body:**
-```json
-{
-  "name": "New Color Name"
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute updated successfully",
-  "status": "success",
-  "data": {
-    "id": 1,
-    "name": "New Color Name"
-  }
-}
-```
-
----
-
-### Delete Attribute
-Delete an attribute. This will also delete all associated attribute values.
-
-**Endpoint:** `DELETE /api/attributes/:id`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute deleted successfully",
-  "status": "success",
-  "data": null
-}
-```
-
----
-
-## Attribute Values
-
-All attribute value endpoints are public. Attribute values represent possible options for an attribute (e.g., "Red", "Blue" for Color, or "Small", "Medium", "Large" for Size).
-
-### Create Attribute Value
-Create a new attribute value.
-
-**Endpoint:** `POST /api/attribute-values`
-
-**Access:** Public
-
-**Request Body:**
-```json
-{
-  "value": "Red",
-  "attributeId": 1
-}
-```
-
-**Validation Rules:**
-- `value`: Required
-- `attributeId`: Required, must be a valid attribute ID
-
-**Success Response (201):**
-```json
-{
-  "message": "Attribute value created successfully",
-  "status": "success",
-  "data": {
-    "id": 1,
-    "value": "Red",
-    "attributeId": 1
-  }
-}
-```
-
----
-
-### Get All Attribute Values
-Retrieve all attribute values with their parent attribute info.
-
-**Endpoint:** `GET /api/attribute-values`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute values retrieved successfully",
-  "status": "success",
-  "data": [
-    {
-      "id": 1,
-      "value": "Red",
-      "attributeId": 1,
-      "attribute": {
-        "id": 1,
-        "name": "Color"
-      }
-    },
-    {
-      "id": 2,
-      "value": "Blue",
-      "attributeId": 1,
-      "attribute": {
-        "id": 1,
-        "name": "Color"
-      }
-    }
-  ]
-}
-```
-
----
-
-### Get Attribute Values by Attribute
-Retrieve all values for a specific attribute.
-
-**Endpoint:** `GET /api/attribute-values/attribute/:attributeId`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute values retrieved successfully",
-  "status": "success",
-  "data": [
-    {
-      "id": 1,
-      "value": "Red",
-      "attributeId": 1
-    },
-    {
-      "id": 2,
-      "value": "Blue",
-      "attributeId": 1
-    }
-  ]
-}
-```
-
----
-
-### Get Attribute Value by ID
-Retrieve a specific attribute value.
-
-**Endpoint:** `GET /api/attribute-values/:id`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute value retrieved successfully",
-  "status": "success",
-  "data": {
-    "id": 1,
-    "value": "Red",
-    "attributeId": 1,
-    "attribute": {
-      "id": 1,
-      "name": "Color"
-    }
-  }
-}
-```
-
----
-
-### Update Attribute Value
-Update an existing attribute value.
-
-**Endpoint:** `PATCH /api/attribute-values/:id`
-
-**Access:** Public
-
-**Request Body:**
-```json
-{
-  "value": "Navy Blue"
-}
-```
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute value updated successfully",
-  "status": "success",
-  "data": {
-    "id": 1,
-    "value": "Navy Blue",
-    "attributeId": 1
-  }
-}
-```
-
----
-
-### Delete Attribute Value
-Delete an attribute value. This will also remove the value from all variant attributes.
-
-**Endpoint:** `DELETE /api/attribute-values/:id`
-
-**Access:** Public
-
-**Success Response (200):**
-```json
-{
-  "message": "Attribute value deleted successfully",
-  "status": "success",
-  "data": null
-}
-```
+- `401`: Invalid credentials
+- `404`: User not found
 
 ---
 
@@ -1398,28 +104,49 @@ Delete an attribute value. This will also remove the value from all variant attr
 
 Stock reservation prevents overselling by reserving stock when users add items to their cart. Reservations expire after 15 minutes (configurable) and are automatically released by a scheduled cron job running every 5 minutes.
 
+### Get Guest Token
+Generate or retrieve guest token for anonymous session tracking. Required for guest users to reserve and release stock.
+
+**Endpoint:** `GET /api/stock-reservation/guest-token`
+
+**Access:** Public
+
+**Response:**
+```json
+{
+  "guestToken": "a1b2c3d4e5f6789012345678901234567"
+}
+```
+
+**Notes:**
+- Token is set as HTTP-only cookie (7 days)
+- Also returned in response body for localStorage storage
+- Include this token in all reservation requests for guest users
+
 ### Reserve Stock
-Reserve stock for a product variant when user adds to cart.
+Reserve stock for a variant. Works for both authenticated users and guest users.
 
 **Endpoint:** `POST /api/stock-reservation/reserve`
 
-**Access:** Requires Authentication (Customer)
+**Access:** Public
 
 **Request Body:**
 ```json
 {
   "variantId": 123,
   "quantity": 2,
-  "expirationMinutes": 15
+  "expirationMinutes": 15,
+  "guestToken": "a1b2c3d4e5f6789012345678901234567"
 }
 ```
 
-**Validation:**
-- `variantId`: Required, must be a valid variant ID
-- `quantity`: Required, must be at least 1
-- `expirationMinutes`: Optional, defaults to 15 minutes
+**Fields:**
+- `variantId` (required): Product variant ID
+- `quantity` (required): Number of items to reserve
+- `expirationMinutes` (optional): Reservation duration (default: 15)
+- `guestToken` (optional): Required for guest users
 
-**Success Response (201):**
+**Success Response (200):**
 ```json
 {
   "message": "Stock reserved successfully",
@@ -1429,31 +156,41 @@ Reserve stock for a product variant when user adds to cart.
     "variantId": 123,
     "quantity": 2,
     "expiresAt": "2026-03-31T20:23:35.000Z",
-    "availableStock": 1
+    "availableStock": 8
   }
 }
 ```
 
 **Error Responses:**
+- `400`: Invalid quantity or missing guest token for anonymous users
 - `404`: Variant not found
-- `400`: Variant not active or deleted
 - `409`: Insufficient stock (e.g., "Only 1 items available. You requested 2.")
 
----
-
 ### Release Reservation
-Release a reservation when user removes item from cart.
+Release a reservation when user removes item from cart. Works for both authenticated users and guest users.
 
 **Endpoint:** `POST /api/stock-reservation/release`
 
-**Access:** Requires Authentication (Customer)
+**Access:** Public
 
-**Request Body:**
+**Request Body (Authenticated User):**
 ```json
 {
   "reservationId": 456
 }
 ```
+
+**Request Body (Guest User):**
+```json
+{
+  "reservationId": 456,
+  "guestToken": "a1b2c3d4e5f6789012345678901234567"
+}
+```
+
+**Fields:**
+- `reservationId` (required): Reservation ID to release
+- `guestToken` (optional): Required for guest users
 
 **Success Response (200):**
 ```json
@@ -1461,22 +198,38 @@ Release a reservation when user removes item from cart.
   "message": "Reservation released successfully",
   "status": "success",
   "data": {
-    "reservationId": 456
+    "reservationId": 456,
+    "restoredStock": 2
   }
 }
 ```
 
-**Error Response:**
-- `404`: Reservation not found or already released/expired
+**Idempotent Behavior:**
+If reservation is already released, returns success:
+```json
+{
+  "message": "Reservation already released",
+  "status": "success",
+  "data": {
+    "reservationId": 456,
+    "restoredStock": 2
+  }
+}
+```
 
----
+**Error Responses:**
+- `400`: Missing authentication or guest token
+- `404`: Reservation not found or already processed
 
 ### Get My Reservations
 Get all active reservations for the current user.
 
 **Endpoint:** `GET /api/stock-reservation/my-reservations`
 
-**Access:** Requires Authentication (Customer)
+**Access:** Public
+
+**Query Parameters:**
+- `guestToken` (optional): Required for guest users
 
 **Success Response (200):**
 ```json
@@ -1507,8 +260,6 @@ Get all active reservations for the current user.
 }
 ```
 
----
-
 ### Get Available Stock
 Get available stock for a specific variant (considers active reservations).
 
@@ -1530,13 +281,11 @@ Get available stock for a specific variant (considers active reservations).
 }
 ```
 
-**Error Response:**
+**Error Responses:**
 - `404`: Variant not found
 
----
-
 ### Check Availability
-Quickly check if a specific quantity is available.
+Check if stock is available for a given quantity.
 
 **Endpoint:** `POST /api/stock-reservation/check`
 
@@ -1546,7 +295,7 @@ Quickly check if a specific quantity is available.
 ```json
 {
   "variantId": 123,
-  "quantity": 3
+  "quantity": 2
 }
 ```
 
@@ -1559,134 +308,114 @@ Quickly check if a specific quantity is available.
 }
 ```
 
-**Not Available Response (200):**
-```json
-{
-  "available": false,
-  "message": "Only 5 items available",
-  "availableStock": 5
-}
-```
-
----
+**Error Responses:**
+- `404`: Variant not found
 
 ### Release Expired Reservations
 Release all expired reservations (admin/cron endpoint).
 
 **Endpoint:** `POST /api/stock-reservation/release-expired`
 
-**Access:** Public (for cron job)
+**Access:** Public (typically called by cron job)
 
 **Success Response (200):**
 ```json
 {
-  "message": "Expired reservations released",
+  "message": "Released 5 expired reservations and restored stock",
   "status": "success",
   "data": {
-    "count": 3
+    "totalFound": 5,
+    "restored": 5,
+    "skipped": 0,
+    "skippedReservationIds": []
   }
 }
 ```
+
+### Get Reservation by ID
+Get reservation details by ID.
+
+**Endpoint:** `GET /api/stock-reservation/:id`
+
+**Access:** Requires Authentication (Customer)
+
+**Success Response (200):**
+```json
+{
+  "message": "Reservation retrieved",
+  "status": "success",
+  "data": {
+    "id": 456,
+    "userId": 1,
+    "variantId": 123,
+    "quantity": 2,
+    "status": "ACTIVE",
+    "expiresAt": "2026-03-31T20:23:35.000Z",
+    "createdAt": "2026-03-31T20:08:35.000Z",
+    "variant": {
+      "id": 123,
+      "sku": "SKU-123456",
+      "price": 1500.00,
+      "product": {
+        "id": 100,
+        "name": "Classic T-Shirt",
+        "slug": "classic-t-shirt"
+      }
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `401`: Not authenticated
+- `404`: Reservation not found
+
+### Force Clean Reservations
+Force clean ALL active reservations (admin emergency endpoint).
+
+**Endpoint:** `POST /api/stock-reservation/force-clean`
+
+**Access:** Requires Authentication (Admin)
+
+**Success Response (200):**
+```json
+{
+  "message": "Force cleaned 10 active reservations and restored stock",
+  "status": "success",
+  "data": {
+    "totalFound": 10,
+    "restored": 10,
+    "skipped": 0,
+    "skippedReservationIds": []
+  }
+}
+```
+
+**Error Responses:**
+- `401`: Not authenticated
+- `403`: Not authorized (not admin)
 
 ---
 
 ## Error Handling
 
-### Error Response Format
-
-All errors follow a consistent format:
+All error responses follow this format:
 
 ```json
 {
-  "statusCode": 400,
-  "message": "Error message describing what went wrong",
-  "error": "Bad Request"
+  "statusCode": 404,
+  "message": "Reservation not found",
+  "error": "Not Found"
 }
 ```
 
-### Common HTTP Status Codes
+### Common Error Codes
 
-- **200 OK** - Request succeeded
-- **201 Created** - Resource created successfully
-- **400 Bad Request** - Invalid request data
-- **401 Unauthorized** - Missing or invalid authentication token
-- **403 Forbidden** - Insufficient permissions
-- **404 Not Found** - Resource not found
-- **409 Conflict** - Resource already exists (e.g., duplicate email)
-- **500 Internal Server Error** - Server error
-
-### Validation Errors
-
-When validation fails, the response includes detailed error messages:
-
-```json
-{
-  "statusCode": 400,
-  "message": [
-    "email must be a valid email address",
-    "password must be at least 8 characters long"
-  ],
-  "error": "Bad Request"
-}
-```
-
-### Authentication Errors
-
-**Missing Token:**
-```json
-{
-  "statusCode": 401,
-  "message": "Unauthorized"
-}
-```
-
-**Invalid Token:**
-```json
-{
-  "statusCode": 401,
-  "message": "Unauthorized"
-}
-```
-
-**Insufficient Permissions:**
-```json
-{
-  "statusCode": 403,
-  "message": "Forbidden resource"
-}
-```
-
----
-
-## Rate Limiting
-
-Currently, there are no rate limits implemented. Consider implementing rate limiting for production use.
-
----
-
-## CORS Configuration
-
-The API allows requests from:
-- `http://localhost:3000`
-- `http://192.168.68.63:3000`
-
-Credentials are enabled for cross-origin requests.
-
----
-
-## Request Size Limits
-
-- Maximum request body size: **10MB**
-- Suitable for base64 encoded images
-
----
-
-## Best Practices
-
-1. **Always include the Authorization header** for protected endpoints
-2. **Use HTTPS in production** to secure data transmission
-3. **Store JWT tokens securely** (e.g., httpOnly cookies or secure storage)
-4. **Handle errors gracefully** on the client side
-5. **Validate data** before sending requests
-6. **Use appropriate HTTP methods** (GET, POST, PATCH, DELETE)
-7. **Include proper Content-Type headers** (`application/json`)
+| Code | Description |
+|------|-------------|
+| `400` | Bad Request - Invalid input or missing parameters |
+| `401` | Unauthorized - Authentication required |
+| `403` | Forbidden - Insufficient permissions |
+| `404` | Not Found - Resource doesn't exist |
+| `409` | Conflict - Insufficient stock or duplicate reservation |
+| `500` | Internal Server Error - Server-side error |
