@@ -402,13 +402,14 @@ export class StockReservationService {
     // Stock is already decremented when reservation is created,
     // so available = current stock (not stock - reservedQuantity)
     const availableStock = variant.stock;
+    // Total stock = available stock + reserved quantity (original stock before reservations)
 
     return {
       message: 'Available stock retrieved',
       status: 'success',
       data: {
         variantId,
-        totalStock: variant.stock,
+        totalStock: variant.stock + reservedQuantity,
         reservedStock: reservedQuantity,
         availableStock: Math.max(0, availableStock),
       },
@@ -462,10 +463,11 @@ export class StockReservationService {
         // activeReservationQuantity is for reporting Purposes Only
         const activeReservationQuantity = reservationMap.get(id) || 0;
         const availableStock = variant.stock;
+        // Total stock = available stock + active reservations (original stock before reservations)
 
         return {
           variantId: id,
-          totalStock: variant.stock,
+          totalStock: variant.stock + activeReservationQuantity,
           activeReservationQuantity: activeReservationQuantity, // For reporting only - NOT used in availability math
           availableStock: Math.max(0, availableStock),
         };
