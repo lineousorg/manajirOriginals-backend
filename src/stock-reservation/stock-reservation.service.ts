@@ -688,4 +688,39 @@ export class StockReservationService {
       },
     };
   }
+
+  /**
+   * Migrate guest reservations to user account after login
+   * Converts reservations from guestToken to userId
+   */
+  async migrateGuestReservations(userId: number, guestToken: string) {
+    await this.prisma.$transaction(async (tx) => {
+      // Find all active reservations for this guest token
+      const guestReservations = await tx.stockReservation.findMany({
+        where: {
+          guestToken,
+          status: 'ACTIVE',
+          expiresAt: { gt: new Date() },
+        },
+      });
+
+      // Migrate each reservation to the user's account
+      for (const reservation of guestReservations) {
+        await tx.stockReservation.update({
+          where: { id: reservation.id },
+          data: {
+            userId,
+            guestToken: undefined,
+            guestTokenHash: undefined,
+          },
+        });
+      }
+    });
+
+    return {
+      message: 'Guest reservations migrated to user account',
+      status: 'success',
+      data: { migrated: true },
+    };
+  }
 }

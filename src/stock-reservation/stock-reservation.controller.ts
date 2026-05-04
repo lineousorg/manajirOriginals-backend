@@ -1,6 +1,7 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 import {
@@ -14,6 +15,7 @@ import {
   UseGuards,
   Request,
   Res,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { StockReservationService } from './stock-reservation.service';
 import {
@@ -66,9 +68,7 @@ export class StockReservationController {
       });
     }
 
-    return {
-      guestToken,
-    };
+    return res.json({ guestToken });
   }
 
   /**
@@ -157,6 +157,26 @@ export class StockReservationController {
   @Get(':id')
   async getReservation(@Param('id') id: string, @Request() req) {
     return this.stockReservationService.getReservationById(Number(id));
+  }
+
+  /**
+   * Migrate guest reservations to user account after login
+   * POST /stock-reservation/migrate
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('migrate')
+  async migrateGuestReservations(
+    @Request() req: RequestWithUser,
+    @Body() dto: { guestToken: string },
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException();
+    }
+    return await this.stockReservationService.migrateGuestReservations(
+      userId,
+      dto.guestToken,
+    );
   }
 
   /**
