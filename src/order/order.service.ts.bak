@@ -25,7 +25,7 @@ import {
 import { GuestUserService } from '../guest-user/guest-user.service';
 import { PricingService } from '../common/services/pricing.service';
 import { MailerService } from '../mailer/mailer.service';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 
 /**
  * Generate unique order number using UUID
@@ -566,29 +566,10 @@ export class OrderService {
           );
         }
 
-        // Validate reservation ownership: for guest reservations, check guestTokenHash
-        if (reservation.userId) {
-          // Authenticated user reservation
-          if (reservation.userId !== guestUser.id) {
-            throw new BadRequestException(
-              `Reservation ${item.reservationId} does not belong to this guest`,
-            );
-          }
-        } else {
-          // Guest reservation - validate by guestTokenHash
-          if (!dto.guestToken) {
-            throw new BadRequestException(
-              `Guest token is required for reservation ${item.reservationId}`,
-            );
-          }
-          const guestTokenHash = createHash('sha256')
-            .update(dto.guestToken)
-            .digest('hex');
-          if (reservation.guestTokenHash !== guestTokenHash) {
-            throw new BadRequestException(
-              `Reservation ${item.reservationId} does not belong to this guest`,
-            );
-          }
+        if (reservation.userId !== guestUser.id) {
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} does not belong to this guest`,
+          );
         }
 
         if (new Date() > reservation.expiresAt) {

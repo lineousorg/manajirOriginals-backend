@@ -85,4 +85,12 @@ export class CreateGuestOrderDto extends GuestContactDto {
   @IsOptional()
   @IsString()
   recaptchaToken?: string;
+
+  /**
+   * Guest token for validating stock reservations
+   * Required when items have reservationId
+   */
+  @IsOptional()
+  @IsString()
+  guestToken?: string;
 }
