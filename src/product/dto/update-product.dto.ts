@@ -91,6 +91,10 @@ export class UpdateProductDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  productDetailsHtml?: string;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 

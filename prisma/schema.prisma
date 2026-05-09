@@ -59,20 +59,21 @@ model Category {
 }
 
 model Product {
-  id          Int              @id @default(autoincrement())
-  name        String
-  description String?
-  isActive    Boolean          @default(true)
-  categoryId  Int
-  brand       String?
-  createdAt   DateTime         @default(now())
-  slug        String           @unique
-  updatedAt   DateTime         @updatedAt
-  deletedAt   DateTime?
-  isDeleted   Boolean          @default(false)
-  images      Image[]
-  category    Category         @relation(fields: [categoryId], references: [id])
-  variants    ProductVariant[]
+  id                 Int              @id @default(autoincrement())
+  name               String
+  description        String?
+  productDetailsHtml String?          @db.Text
+  isActive           Boolean          @default(true)
+  categoryId         Int
+  brand              String?
+  createdAt          DateTime         @default(now())
+  slug               String           @unique
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
+  isDeleted          Boolean          @default(false)
+  images             Image[]
+  category           Category         @relation(fields: [categoryId], references: [id])
+  variants           ProductVariant[]
 
   @@index([isDeleted])
   @@index([categoryId, isDeleted])
@@ -164,6 +165,7 @@ model Order {
   shippingName       String?
   shippingPhone      String?
   shippingPostalCode String?
+  note               String?
   address            Address?           @relation(fields: [addressId], references: [id])
   guestUser          GuestUser?         @relation(fields: [guestUserId], references: [id])
   user               User?              @relation(fields: [userId], references: [id])

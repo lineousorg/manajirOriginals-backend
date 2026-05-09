@@ -4,6 +4,7 @@ import {
   IsArray,
   IsOptional,
   IsEnum,
+  IsString,
   Min,
   ArrayMinSize,
   ValidateNested,
@@ -47,4 +48,8 @@ export class CreateOrderDto {
   @IsEnum(DeliveryType)
   @IsOptional()
   deliveryType?: DeliveryType = DeliveryType.INSIDE_DHAKA;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
 }

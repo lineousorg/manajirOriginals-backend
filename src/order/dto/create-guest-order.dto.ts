@@ -93,4 +93,8 @@ export class CreateGuestOrderDto extends GuestContactDto {
   @IsOptional()
   @IsString()
   guestToken?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
 }

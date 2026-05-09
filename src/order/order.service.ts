@@ -326,6 +326,7 @@ export class OrderService {
           customerEmail: user.email,
           customerPhone: shippingSnapshot.shippingPhone,
           ...shippingSnapshot,
+          note: dto.note,
           items: {
             create: orderItemsData,
           },
@@ -351,6 +352,7 @@ export class OrderService {
           shippingCity: true,
           shippingPostalCode: true,
           shippingCountry: true,
+          note: true,
           createdAt: true,
           updatedAt: true,
           user: {
@@ -679,6 +681,7 @@ export class OrderService {
           shippingCity: dto.city || null,
           shippingPostalCode: dto.postalCode || null,
           shippingCountry: 'Bangladesh',
+          note: dto.note,
           items: {
             create: orderItemsData,
           },
@@ -704,6 +707,7 @@ export class OrderService {
           shippingCity: true,
           shippingPostalCode: true,
           shippingCountry: true,
+          note: true,
           createdAt: true,
           updatedAt: true,
           guestUser: {

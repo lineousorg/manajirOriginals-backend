@@ -36,6 +36,10 @@ export class CreateProductDto {
   categoryId!: number;
 
   @IsOptional()
+  @IsString()
+  productDetailsHtml?: string;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 
