@@ -225,48 +225,6 @@ export class ProductService {
     }
 
     const lightweightProducts = products.map((product) => {
-      const now = new Date();
-
-      // Calculate prices using helper method
-      let minPrice = 0;
-      let maxPrice = 0;
-      let minFinalPrice = 0;
-      let hasDiscount = false;
-
-      if (product.variants.length > 0) {
-        const basePrices: number[] = [];
-        const finalPrices: number[] = [];
-        let minBasePrice = Infinity;
-        let minBaseVariant: any = null;
-
-        for (const variant of product.variants) {
-          const pricing = this.calculateVariantPricing(variant, now);
-          basePrices.push(pricing.basePrice);
-          finalPrices.push(pricing.finalPrice);
-
-          // Track variant with minimum base price for minFinalPrice
-          if (pricing.basePrice < minBasePrice) {
-            minBasePrice = pricing.basePrice;
-            minBaseVariant = variant;
-          }
-
-          if (pricing.hasDiscount) {
-            hasDiscount = true;
-          }
-        }
-
-        minPrice = Math.min(...basePrices);
-        maxPrice = Math.max(...basePrices);
-
-        // Find the final price of the variant with minimum base price
-        if (minBaseVariant) {
-          const minPricing = this.calculateVariantPricing(minBaseVariant, now);
-          minFinalPrice = minPricing.finalPrice;
-        } else {
-          minFinalPrice = minPrice;
-        }
-      }
-
       // Calculate available stock using pre-fetched data
       let totalAvailableStock = 0;
       let totalReservedStock = 0;
@@ -276,6 +234,9 @@ export class ProductService {
         totalReservedStock += stockData?.activeReservationQuantity ?? 0;
       }
 
+      // Build unified pricing information using the single source of truth
+      const pricingInfo = this.pricingService.buildProductPricing(product);
+
       return {
         id: product.id,
         name: product.name,
@@ -284,17 +245,18 @@ export class ProductService {
         createdAt: product.createdAt,
         category: product.category,
         thumbnail: product.images[0]?.url || null,
-        minPrice,
-        maxPrice,
         totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
         availableStock: totalAvailableStock,
         reservedStock: totalReservedStock,
         hasVariants: product.variants.length > 0,
-        hasDiscount,
-        discountAmount:
-          minFinalPrice > 0 && minFinalPrice < minPrice
-            ? minPrice - minFinalPrice
-            : 0,
+        pricing: {
+          minPrice: pricingInfo.minPrice,
+          maxPrice: pricingInfo.maxPrice,
+          finalMinPrice: pricingInfo.finalMinPrice,
+          finalMaxPrice: pricingInfo.finalMaxPrice,
+          hasDiscount: pricingInfo.hasDiscount,
+          discount: pricingInfo.discount,
+        },
       };
     });
 
@@ -409,46 +371,6 @@ export class ProductService {
     const stockMap = new Map(stockInfo.map((s) => [s.variantId, s]));
 
     const lightweightProducts = products.map((product) => {
-      const now = new Date();
-
-      // Calculate prices using helper method
-      let minPrice = 0;
-      let maxPrice = 0;
-      let minFinalPrice = 0;
-      let hasDiscount = false;
-
-      if (product.variants.length > 0) {
-        const basePrices: number[] = [];
-        const finalPrices: number[] = [];
-        let minBasePrice = Infinity;
-        let minBaseVariant: any = null;
-
-        for (const variant of product.variants) {
-          const pricing = this.calculateVariantPricing(variant, now);
-          basePrices.push(pricing.basePrice);
-          finalPrices.push(pricing.finalPrice);
-
-          if (pricing.basePrice < minBasePrice) {
-            minBasePrice = pricing.basePrice;
-            minBaseVariant = variant;
-          }
-
-          if (pricing.hasDiscount) {
-            hasDiscount = true;
-          }
-        }
-
-        minPrice = Math.min(...basePrices);
-        maxPrice = Math.max(...basePrices);
-
-        if (minBaseVariant) {
-          const minPricing = this.calculateVariantPricing(minBaseVariant, now);
-          minFinalPrice = minPricing.finalPrice;
-        } else {
-          minFinalPrice = minPrice;
-        }
-      }
-
       // Calculate available stock using pre-fetched data
       let totalAvailableStock = 0;
       let totalReservedStock = 0;
@@ -458,6 +380,9 @@ export class ProductService {
         totalReservedStock += stockData?.activeReservationQuantity ?? 0;
       }
 
+      // Build unified pricing information using the single source of truth
+      const pricingInfo = this.pricingService.buildProductPricing(product);
+
       return {
         id: product.id,
         name: product.name,
@@ -466,15 +391,18 @@ export class ProductService {
         createdAt: product.createdAt,
         category: product.category,
         thumbnail: product.images[0]?.url || null,
-        minPrice,
-        maxPrice,
-        minFinalPrice,
         totalStock: product.variants.reduce((sum, v) => sum + v.stock, 0),
         availableStock: totalAvailableStock,
         reservedStock: totalReservedStock,
         hasVariants: product.variants.length > 0,
-        hasDiscount,
-        discountAmount: 0,
+        pricing: {
+          minPrice: pricingInfo.minPrice,
+          maxPrice: pricingInfo.maxPrice,
+          finalMinPrice: pricingInfo.finalMinPrice,
+          finalMaxPrice: pricingInfo.finalMaxPrice,
+          hasDiscount: pricingInfo.hasDiscount,
+          discount: pricingInfo.discount,
+        },
       };
     });
 

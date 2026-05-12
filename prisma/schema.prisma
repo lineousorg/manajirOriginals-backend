@@ -62,7 +62,6 @@ model Product {
   id                 Int              @id @default(autoincrement())
   name               String
   description        String?
-  productDetailsHtml String?          @db.Text
   isActive           Boolean          @default(true)
   categoryId         Int
   brand              String?
@@ -71,6 +70,7 @@ model Product {
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
   isDeleted          Boolean          @default(false)
+  productDetailsHtml String?
   images             Image[]
   category           Category         @relation(fields: [categoryId], references: [id])
   variants           ProductVariant[]
