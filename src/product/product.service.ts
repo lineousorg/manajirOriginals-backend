@@ -12,6 +12,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { StockReservationService } from '../stock-reservation/stock-reservation.service';
 import { PricingService } from '../common/services/pricing.service';
+import { FileService } from '../common/services/file.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
@@ -28,6 +29,7 @@ export class ProductService {
     private prisma: PrismaService,
     private stockReservationService: StockReservationService,
     private pricingService: PricingService,
+    private fileService: FileService,
   ) {}
 
   /**
@@ -906,6 +908,34 @@ export class ProductService {
       message: 'Variant deleted successfully',
       status: 'success',
       data: null,
+    };
+  }
+
+  // Delete a product image
+  async deleteImage(productId: number, imageId: number) {
+    // 1. Find the image and verify it belongs to the product
+    const image = await this.prisma.image.findFirst({
+      where: { id: imageId, productId },
+    });
+
+    if (!image) {
+      throw new NotFoundException(
+        'Image not found or does not belong to this product',
+      );
+    }
+
+    // 2. Delete the file from filesystem
+    const filePath = image.url; // e.g., /public/uploads/products/filename.jpg
+    await this.fileService.deleteFile(filePath);
+
+    // 3. Delete the database record
+    await this.prisma.image.delete({
+      where: { id: imageId },
+    });
+
+    return {
+      message: 'Image deleted successfully',
+      status: 'success',
     };
   }
 }

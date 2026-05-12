@@ -89,4 +89,14 @@ export class ProductController {
   ) {
     return this.productService.removeVariant(id, variantId);
   }
+
+  @Delete(':id/images/:imageId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  deleteProductImage(
+    @Param('id', ParseIntPipe) productId: number,
+    @Param('imageId', ParseIntPipe) imageId: number,
+  ) {
+    return this.productService.deleteImage(productId, imageId);
+  }
 }
