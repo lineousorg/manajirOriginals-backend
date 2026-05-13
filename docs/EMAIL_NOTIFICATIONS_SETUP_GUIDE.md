@@ -71,7 +71,7 @@ MAILER_SECURE=false
 MAILER_USER=your-email@gmail.com
 MAILER_PASSWORD=your-16-char-app-password
 MAILER_FROM=your-email@gmail.com
-MAILER_FROM_NAME=Manajir Original
+MAILER_FROM_NAME=Manajir Originals
 ```
 
 **Important:**

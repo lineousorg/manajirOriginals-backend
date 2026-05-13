@@ -51,7 +51,7 @@ export class MailerProcessor implements OnModuleInit {
         this.configService.get<string>('MAILER_FROM') || 'noreply@manajir.com';
       const fromName =
         this.configService.get<string>('MAILER_FROM_NAME') ||
-        'Manajir Original';
+        'Manajir Originals';
 
       // Validate required config
       if (!host || !user || !password) {
@@ -177,9 +177,9 @@ export class MailerProcessor implements OnModuleInit {
       });
 
       const mailOptions = {
-        from: `"Manajir Original" <${this.configService.get<string>('MAILER_FROM') || 'noreply@manajir.com'}>`,
+        from: `"Manajir Originals" <${this.configService.get<string>('MAILER_FROM') || 'noreply@manajir.com'}>`,
         to: customerEmail,
-        subject: `Order Confirmed - ${orderNumber} | Manajir Original`,
+        subject: `Order Confirmed - ${orderNumber} | Manajir Originals`,
         html: this.generateOrderConfirmationHtml({
           customerName: customerName || 'Valued Customer',
           orderNumber,

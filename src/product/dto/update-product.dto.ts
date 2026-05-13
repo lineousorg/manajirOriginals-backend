@@ -74,6 +74,10 @@ export class UpdateProductImageDto {
 
   @IsOptional()
   @IsString()
+  publicId?: string;
+
+  @IsOptional()
+  @IsString()
   altText?: string;
 
   @IsOptional()

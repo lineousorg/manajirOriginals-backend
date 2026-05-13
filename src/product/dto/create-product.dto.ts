@@ -15,6 +15,10 @@ export class CreateProductImageDto {
 
   @IsOptional()
   @IsString()
+  publicId?: string;
+
+  @IsOptional()
+  @IsString()
   altText?: string;
 
   @IsOptional()

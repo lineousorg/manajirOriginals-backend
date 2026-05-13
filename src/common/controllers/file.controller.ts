@@ -12,6 +12,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { FileService } from '../services/file.service';
+import { CloudinaryService } from '../services/cloudinary.service';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
@@ -19,7 +20,10 @@ import { Role } from '@prisma/client';
 
 @Controller('upload')
 export class FileController {
-  constructor(private readonly fileService: FileService) {}
+  constructor(
+    private readonly fileService: FileService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   /**
    * Upload product image
@@ -62,12 +66,20 @@ export class FileController {
       },
     }),
   )
-  uploadProductImage(@UploadedFile() file: Express.Multer.File) {
+  async uploadProductImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
 
+    // Upload to Cloudinary
+    const cloudinaryResult = await this.cloudinaryService.upload(
+      file.path,
+      'products',
+    );
+
+    // Delete the local file after successful upload
     const publicPath = `/public/uploads/products/${file.filename}`;
+    await this.fileService.deleteFile(publicPath);
 
     return {
       message: 'Product image uploaded successfully',
@@ -75,7 +87,8 @@ export class FileController {
       data: {
         filename: file.filename,
         originalName: file.originalname,
-        url: publicPath,
+        url: cloudinaryResult.secure_url,
+        publicId: cloudinaryResult.public_id,
         mimetype: file.mimetype,
         size: file.size,
       },
@@ -123,12 +136,20 @@ export class FileController {
       },
     }),
   )
-  uploadCategoryImage(@UploadedFile() file: Express.Multer.File) {
+  async uploadCategoryImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
 
+    // Upload to Cloudinary
+    const cloudinaryResult = await this.cloudinaryService.upload(
+      file.path,
+      'categories',
+    );
+
+    // Delete the local file after successful upload
     const publicPath = `/public/uploads/categories/${file.filename}`;
+    await this.fileService.deleteFile(publicPath);
 
     return {
       message: 'Category image uploaded successfully',
@@ -136,7 +157,8 @@ export class FileController {
       data: {
         filename: file.filename,
         originalName: file.originalname,
-        url: publicPath,
+        url: cloudinaryResult.secure_url,
+        publicId: cloudinaryResult.public_id,
         mimetype: file.mimetype,
         size: file.size,
       },
@@ -184,12 +206,20 @@ export class FileController {
       },
     }),
   )
-  uploadVariantImage(@UploadedFile() file: Express.Multer.File) {
+  async uploadVariantImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
 
+    // Upload to Cloudinary
+    const cloudinaryResult = await this.cloudinaryService.upload(
+      file.path,
+      'variants',
+    );
+
+    // Delete the local file after successful upload
     const publicPath = `/public/uploads/variants/${file.filename}`;
+    await this.fileService.deleteFile(publicPath);
 
     return {
       message: 'Variant image uploaded successfully',
@@ -197,7 +227,8 @@ export class FileController {
       data: {
         filename: file.filename,
         originalName: file.originalname,
-        url: publicPath,
+        url: cloudinaryResult.secure_url,
+        publicId: cloudinaryResult.public_id,
         mimetype: file.mimetype,
         size: file.size,
       },

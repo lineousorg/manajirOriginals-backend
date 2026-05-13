@@ -130,6 +130,7 @@ model VariantAttribute {
 model Image {
   id         Int             @id @default(autoincrement())
   url        String
+  publicId   String?
   altText    String?
   position   Int
   type       ImageType

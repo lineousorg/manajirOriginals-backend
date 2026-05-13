@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StockReservationService } from '../stock-reservation/stock-reservation.service';
 import { PricingService } from '../common/services/pricing.service';
 import { FileService } from '../common/services/file.service';
+import { CloudinaryService } from '../common/services/cloudinary.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
@@ -30,6 +31,7 @@ export class ProductService {
     private stockReservationService: StockReservationService,
     private pricingService: PricingService,
     private fileService: FileService,
+    private cloudinaryService: CloudinaryService,
   ) {}
 
   /**
@@ -90,6 +92,7 @@ export class ProductService {
           ? {
               create: dto.images.map((img, index) => ({
                 url: img.url,
+                publicId: img.publicId ?? null,
                 altText: img.altText ?? null,
                 position: img.position ?? index,
                 type: 'PRODUCT',
@@ -596,6 +599,7 @@ export class ProductService {
               where: { id: img.id },
               data: {
                 url: img.url,
+                publicId: img.publicId ?? null,
                 altText: img.altText ?? null,
                 position: img.position ?? 0,
               },
@@ -610,6 +614,7 @@ export class ProductService {
           data: imagesToCreate.map((img, index) => ({
             productId: id,
             url: img.url,
+            publicId: img.publicId ?? null,
             altText: img.altText ?? null,
             position: img.position ?? index,
             type: 'PRODUCT',
@@ -928,7 +933,12 @@ export class ProductService {
     const filePath = image.url; // e.g., /public/uploads/products/filename.jpg
     await this.fileService.deleteFile(filePath);
 
-    // 3. Delete the database record
+    // 3. Delete the image from Cloudinary (if publicId exists)
+    if (image.publicId) {
+      await this.cloudinaryService.delete(image.publicId);
+    }
+
+    // 4. Delete the database record
     await this.prisma.image.delete({
       where: { id: imageId },
     });
