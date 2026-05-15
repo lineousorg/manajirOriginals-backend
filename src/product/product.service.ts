@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -15,7 +16,10 @@ import { PricingService } from '../common/services/pricing.service';
 import { FileService } from '../common/services/file.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { CreateProductDto } from './dto/create-product.dto';
-import { UpdateProductDto } from './dto/update-product.dto';
+import {
+  UpdateProductDto,
+  UpdateProductVariantDto,
+} from './dto/update-product.dto';
 import { VariantWithAttributesDto } from './dto/create-product-with-attribute.dto';
 import { CategoryProductsQueryDto } from './dto/category-products.dto';
 import {
@@ -75,6 +79,94 @@ export class ProductService {
     });
   }
 
+  /**
+   * Generate a deterministic combination key for variant attributes
+   * Format: "attrId:valueId|attrId:valueId" sorted by attributeId
+   */
+  private generateCombinationKey(
+    attributes: { attributeId: number; valueId: number }[],
+  ): string {
+    return attributes
+      .sort((a, b) => a.attributeId - b.attributeId)
+      .map((a) => `${a.attributeId}:${a.valueId}`)
+      .join('|');
+  }
+
+  /**
+   * Validate variant attributes against category and attribute rules.
+   *
+   * Validation A: Each attributeId must be assigned to the product's category
+   * Validation B: Each valueId must belong to the claimed attributeId
+   * Validation C: No duplicate attributeId within a single variant
+   */
+  private async validateVariantAttributes(
+    categoryId: number,
+    variantAttributes: { attributeId: number; valueId: number }[],
+    variantIndex: number,
+  ): Promise<void> {
+    if (!variantAttributes || variantAttributes.length === 0) {
+      return;
+    }
+
+    // Validation C: Check for duplicate attribute types within this variant
+    const attributeIdSet = new Set<number>();
+    for (const attr of variantAttributes) {
+      if (attributeIdSet.has(attr.attributeId)) {
+        throw new BadRequestException(
+          `Variant ${variantIndex}: Duplicate attribute type ${attr.attributeId}. A variant cannot have two values for the same attribute.`,
+        );
+      }
+      attributeIdSet.add(attr.attributeId);
+    }
+
+    // Fetch category's assigned attributes (including parent categories)
+    const categoryIds: number[] = [];
+    let currentCategoryId: number | null = categoryId;
+    while (currentCategoryId) {
+      categoryIds.push(currentCategoryId);
+      const cat = await this.prisma.category.findUnique({
+        where: { id: currentCategoryId },
+        select: { parentId: true },
+      });
+      currentCategoryId = cat?.parentId ?? null;
+    }
+
+    const categoryAttributes = await this.prisma.categoryAttribute.findMany({
+      where: { categoryId: { in: categoryIds } },
+      select: { attributeId: true },
+    });
+
+    const allowedAttributeIds = new Set(
+      categoryAttributes.map((ca) => ca.attributeId),
+    );
+
+    for (const attr of variantAttributes) {
+      // Validation A: attributeId must belong to the category
+      if (!allowedAttributeIds.has(attr.attributeId)) {
+        throw new BadRequestException(
+          `Variant ${variantIndex}: Attribute ${attr.attributeId} is not applicable to this product's category.`,
+        );
+      }
+
+      // Validation B: valueId must belong to the attributeId
+      const attributeValue = await this.prisma.attributeValue.findUnique({
+        where: { id: attr.valueId },
+      });
+
+      if (!attributeValue || attributeValue.isDeleted) {
+        throw new NotFoundException(
+          `Variant ${variantIndex}: Attribute value ${attr.valueId} not found.`,
+        );
+      }
+
+      if (attributeValue.attributeId !== attr.attributeId) {
+        throw new BadRequestException(
+          `Variant ${variantIndex}: Value ${attr.valueId} does not belong to attribute ${attr.attributeId}.`,
+        );
+      }
+    }
+  }
+
   async create(dto: CreateProductDto) {
     // Check if slug already exists
     const existingProduct = await this.prisma.product.findUnique({
@@ -83,6 +175,23 @@ export class ProductService {
 
     if (existingProduct) {
       throw new ConflictException('Product with this slug already exists');
+    }
+
+    // Validate all variant attributes before creating
+    if (dto.variants && dto.variants.length > 0) {
+      for (let i = 0; i < dto.variants.length; i++) {
+        const variant = dto.variants[i] as VariantWithAttributesDto;
+        if (variant.attributes && variant.attributes.length > 0) {
+          await this.validateVariantAttributes(
+            dto.categoryId,
+            variant.attributes.map((a) => ({
+              attributeId: a.attributeId,
+              valueId: a.valueId,
+            })),
+            i + 1,
+          );
+        }
+      }
     }
 
     const product = await this.prisma.product.create({
@@ -122,6 +231,16 @@ export class ProductService {
                   ? new Date(v.discountStart)
                   : null,
                 discountEnd: v.discountEnd ? new Date(v.discountEnd) : null,
+                // Generate combination key for duplicate detection
+                combinationKey:
+                  v.attributes && v.attributes.length > 0
+                    ? this.generateCombinationKey(
+                        v.attributes.map((a) => ({
+                          attributeId: a.attributeId,
+                          valueId: a.valueId,
+                        })),
+                      )
+                    : null,
                 ...(v.attributes && {
                   attributes: {
                     create: v.attributes.map((a) => ({
@@ -282,7 +401,7 @@ export class ProductService {
     query: CategoryProductsQueryDto,
   ): Promise<PaginatedResponse<any>> {
     // findByCategory method
-    const { page = 1, limit = 20 } = query;
+    const { page = 1, limit = 20, attributeFilters } = query;
     const skip = (page - 1) * limit;
 
     // Find the category by slug (including parent categories)
@@ -319,6 +438,25 @@ export class ProductService {
         { category: { parentId: actualCategory.id } },
       ],
     };
+
+    // Add attribute-based filtering
+    if (attributeFilters && attributeFilters.length > 0) {
+      whereClause.AND = attributeFilters.map((filter) => ({
+        variants: {
+          some: {
+            isDeleted: false,
+            attributes: {
+              some: {
+                attributeValue: {
+                  attributeId: filter.attributeId,
+                  id: { in: filter.valueIds },
+                },
+              },
+            },
+          },
+        },
+      }));
+    }
 
     // Fetch products with minimal data - same as findAll
     const [products, total] = await Promise.all([
@@ -438,6 +576,18 @@ export class ProductService {
             id: true,
             name: true,
             slug: true,
+            attributes: {
+              include: {
+                attribute: {
+                  include: {
+                    values: {
+                      where: { isDeleted: false },
+                      orderBy: { value: 'asc' },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         variants: {
@@ -520,12 +670,26 @@ export class ProductService {
     // Sort variants by size if they have size attributes
     const sortedVariants = this.sortVariantsBySize(variantsWithAvailableStock);
 
+    // Build applicable attributes from category (for frontend attribute selectors)
+    const applicableAttributes =
+      product.category?.attributes?.map((ca) => ({
+        attributeId: ca.attribute.id,
+        name: ca.attribute.name,
+        isRequired: ca.isRequired,
+        isVariantSelectable: ca.isVariantSelectable,
+        values: ca.attribute.values.map((v) => ({
+          id: v.id,
+          value: v.value,
+        })),
+      })) ?? [];
+
     return {
       message: 'Product found',
       status: 'success',
       data: {
         ...product,
         variants: sortedVariants,
+        applicableAttributes,
       },
     };
   }
@@ -579,117 +743,96 @@ export class ProductService {
       return { message: 'Product updated successfully', data: updatedProduct };
     }
 
-    // Run operations sequentially (no transaction - more reliable)
-    // 1. Update basic product fields first
-    const updateData: any = { ...rest };
-    if (categoryId) {
-      updateData.category = { connect: { id: categoryId } };
+    // --- Transactional path for variant/image updates ---
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        categoryId: true,
+        variants: {
+          where: { isDeleted: false },
+          select: { id: true, sku: true },
+        },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
     }
 
-    // 2. Handle images - update existing or add new ones
-    if (images && images.length > 0) {
-      const imagesToUpdate = images.filter((img) => img.id);
-      const imagesToCreate = images.filter((img) => !img.id);
+    // Resolve categoryId for validation (use existing if not being changed)
+    const targetCategoryId = categoryId ?? product.categoryId;
 
-      // Update all images in parallel
-      if (imagesToUpdate.length > 0) {
-        await Promise.all(
-          imagesToUpdate.map((img) =>
-            this.prisma.image.update({
-              where: { id: img.id },
-              data: {
-                url: img.url,
-                publicId: img.publicId ?? null,
-                altText: img.altText ?? null,
-                position: img.position ?? 0,
-              },
-            }),
-          ),
-        );
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Update basic product fields
+      const updateData: any = { ...rest };
+      if (categoryId) {
+        updateData.category = { connect: { id: categoryId } };
       }
 
-      // Create new images
-      if (imagesToCreate.length > 0) {
-        await this.prisma.image.createMany({
-          data: imagesToCreate.map((img, index) => ({
-            productId: id,
-            url: img.url,
-            publicId: img.publicId ?? null,
-            altText: img.altText ?? null,
-            position: img.position ?? index,
-            type: 'PRODUCT',
-          })),
-        });
-      }
-    }
-
-    // 3. Handle variants - optimized with parallel queries
-    if (variants && variants.length > 0) {
-      // Fetch existing variants once
-      const existingVariants = await this.prisma.productVariant.findMany({
-        where: { productId: id, isDeleted: false },
-        select: { id: true, sku: true },
+      await tx.product.update({
+        where: { id },
+        data: updateData,
       });
 
-      const existingVariantMap = new Map(
-        existingVariants.map((v) => [v.sku, v.id]),
-      );
+      // 2. Handle images - update existing or add new ones
+      if (images && images.length > 0) {
+        const imagesToUpdate = images.filter((img) => img.id);
+        const imagesToCreate = images.filter((img) => !img.id);
 
-      // Separate variants with IDs (update) and without IDs (upsert by SKU)
-      const variantsToUpdate = variants.filter((v) => v.id);
-      const variantsToUpsert = variants.filter((v) => !v.id);
+        // Update all images in parallel
+        if (imagesToUpdate.length > 0) {
+          await Promise.all(
+            imagesToUpdate.map((img) =>
+              tx.image.update({
+                where: { id: img.id },
+                data: {
+                  url: img.url,
+                  publicId: img.publicId ?? null,
+                  altText: img.altText ?? null,
+                  position: img.position ?? 0,
+                },
+              }),
+            ),
+          );
+        }
 
-      // Update existing variants by ID in parallel
-      if (variantsToUpdate.length > 0) {
-        await Promise.all(
-          variantsToUpdate.map((variant) =>
-            variant.id
-              ? this.prisma.productVariant.update({
-                  where: { id: variant.id },
-                  data: {
-                    ...(variant.price !== undefined && {
-                      price: variant.price,
-                    }),
-                    ...(variant.stock !== undefined && {
-                      stock: variant.stock,
-                    }),
-                    ...(variant.sku !== undefined && { sku: variant.sku }),
-                    // Discount fields
-                    ...(variant.discountType !== undefined && {
-                      discountType: variant.discountType,
-                    }),
-                    ...(variant.discountValue !== undefined && {
-                      discountValue: variant.discountValue,
-                    }),
-                    ...(variant.discountStart !== undefined && {
-                      discountStart: variant.discountStart
-                        ? new Date(variant.discountStart)
-                        : null,
-                    }),
-                    ...(variant.discountEnd !== undefined && {
-                      discountEnd: variant.discountEnd
-                        ? new Date(variant.discountEnd)
-                        : null,
-                    }),
-                  },
-                })
-              : Promise.resolve(),
-          ),
-        );
+        // Create new images
+        if (imagesToCreate.length > 0) {
+          await tx.image.createMany({
+            data: imagesToCreate.map((img, index) => ({
+              productId: id,
+              url: img.url,
+              publicId: img.publicId ?? null,
+              altText: img.altText ?? null,
+              position: img.position ?? index,
+              type: 'PRODUCT',
+            })),
+          });
+        }
       }
 
-      // Upsert variants by checking if SKU exists - in parallel
-      if (variantsToUpsert.length > 0) {
-        const upsertPromises = variantsToUpsert.map((variant) => {
-          if (variant.sku && variant.price !== undefined) {
-            const existingId = existingVariantMap.get(variant.sku);
-            if (existingId) {
-              return this.prisma.productVariant.update({
-                where: { id: existingId },
-                data: {
-                  price: variant.price,
-                  stock: variant.stock ?? 0,
-                  // Discount fields
+      // 3. Handle variants - with attribute support and transaction safety
+      if (variants && variants.length > 0) {
+        const existingVariants = product.variants;
+        const existingVariantMap = new Map(
+          existingVariants.map((v) => [v.sku, v.id]),
+        );
+
+        const variantsToUpdate = variants.filter(
+          (v) => v.id !== undefined,
+        ) as (UpdateProductVariantDto & { id: number })[];
+        const variantsToUpsert = variants.filter((v) => !v.id);
+
+        // Update existing variants by ID
+        if (variantsToUpdate.length > 0) {
+          await Promise.all(
+            variantsToUpdate.map((variant) =>
+              (async () => {
+                const updateData: any = {
+                  ...(variant.price !== undefined && { price: variant.price }),
+                  ...(variant.stock !== undefined && { stock: variant.stock }),
+                  ...(variant.sku !== undefined && { sku: variant.sku }),
                   ...(variant.discountType !== undefined && {
                     discountType: variant.discountType,
                   }),
@@ -706,80 +849,211 @@ export class ProductService {
                       ? new Date(variant.discountEnd)
                       : null,
                   }),
-                },
-              });
-            } else {
-              // Create new variant with attributes
-              const hasAttributes =
-                variant.attributes && variant.attributes.length > 0;
-              return this.prisma.productVariant.create({
-                data: {
-                  productId: id,
-                  sku: variant.sku,
-                  price: variant.price,
-                  stock: variant.stock ?? 0,
-                  isActive: true,
-                  isDeleted: false,
-                  // Discount fields
-                  discountType: variant.discountType ?? null,
-                  discountValue: variant.discountValue ?? null,
-                  discountStart: variant.discountStart
-                    ? new Date(variant.discountStart)
-                    : null,
-                  discountEnd: variant.discountEnd
-                    ? new Date(variant.discountEnd)
-                    : null,
-                  // Connect attributes if provided
-                  ...(hasAttributes && {
-                    attributes: {
-                      create: variant.attributes!.map((attr) => ({
-                        attributeValueId: attr.valueId,
+                };
+
+                // Handle attribute updates on existing variants
+                if (variant.attributes) {
+                  // Validate attributes
+                  await this.validateVariantAttributes(
+                    targetCategoryId,
+                    variant.attributes.map((a) => ({
+                      attributeId: a.attributeId,
+                      valueId: a.valueId,
+                    })),
+                    variant.id!,
+                  );
+
+                  // Delete existing attribute bindings
+                  await tx.variantAttribute.deleteMany({
+                    where: { variantId: variant.id! },
+                  });
+
+                  // Create new attribute bindings
+                  if (variant.attributes.length > 0) {
+                    await tx.variantAttribute.createMany({
+                      data: variant.attributes.map((a) => ({
+                        variantId: variant.id!,
+                        attributeValueId: a.valueId,
                       })),
-                    },
+                    });
+                  }
+
+                  // Update combination key
+                  updateData.combinationKey =
+                    variant.attributes.length > 0
+                      ? this.generateCombinationKey(
+                          variant.attributes.map((a) => ({
+                            attributeId: a.attributeId,
+                            valueId: a.valueId,
+                          })),
+                        )
+                      : null;
+                }
+
+                return tx.productVariant.update({
+                  where: { id: variant.id },
+                  data: updateData,
+                });
+              })(),
+            ),
+          );
+        }
+
+        // Upsert variants by checking if SKU exists
+        if (variantsToUpsert.length > 0) {
+          const upsertPromises = variantsToUpsert.map((variant) => {
+            if (variant.sku && variant.price !== undefined) {
+              const existingId = existingVariantMap.get(variant.sku);
+
+              if (existingId) {
+                // Update existing variant found by SKU
+                const updateData: any = {
+                  price: variant.price!,
+                  stock: variant.stock ?? 0,
+                  ...(variant.discountType !== undefined && {
+                    discountType: variant.discountType,
                   }),
-                },
-              });
+                  ...(variant.discountValue !== undefined && {
+                    discountValue: variant.discountValue,
+                  }),
+                  ...(variant.discountStart !== undefined && {
+                    discountStart: variant.discountStart
+                      ? new Date(variant.discountStart)
+                      : null,
+                  }),
+                  ...(variant.discountEnd !== undefined && {
+                    discountEnd: variant.discountEnd
+                      ? new Date(variant.discountEnd)
+                      : null,
+                  }),
+                };
+
+                // Handle attributes on SKU-matched existing variant
+                if (variant.attributes) {
+                  return (async () => {
+                    await this.validateVariantAttributes(
+                      targetCategoryId,
+                      variant.attributes!,
+                      existingId,
+                    );
+
+                    await tx.variantAttribute.deleteMany({
+                      where: { variantId: existingId },
+                    });
+
+                    if (variant.attributes!.length > 0) {
+                      await tx.variantAttribute.createMany({
+                        data: variant.attributes!.map((a) => ({
+                          variantId: existingId,
+                          attributeValueId: a.valueId,
+                        })),
+                      });
+                    }
+
+                    updateData.combinationKey =
+                      variant.attributes!.length > 0
+                        ? this.generateCombinationKey(variant.attributes!)
+                        : null;
+
+                    return tx.productVariant.update({
+                      where: { id: existingId },
+                      data: updateData,
+                    });
+                  })();
+                }
+
+                return tx.productVariant.update({
+                  where: { id: existingId },
+                  data: updateData,
+                });
+              }
+
+              // Create new variant with attributes
+              return (async () => {
+                if (variant.attributes && variant.attributes.length > 0) {
+                  await this.validateVariantAttributes(
+                    targetCategoryId,
+                    variant.attributes,
+                    0,
+                  );
+                }
+
+                const hasAttributes =
+                  variant.attributes && variant.attributes.length > 0;
+
+                return tx.productVariant.create({
+                  data: {
+                    productId: id,
+                    sku: variant.sku as string,
+                    price: variant.price as number,
+                    stock: variant.stock ?? 0,
+                    isActive: true,
+                    isDeleted: false,
+                    discountType: variant.discountType ?? null,
+                    discountValue: variant.discountValue ?? null,
+                    discountStart: variant.discountStart
+                      ? new Date(variant.discountStart)
+                      : null,
+                    discountEnd: variant.discountEnd
+                      ? new Date(variant.discountEnd)
+                      : null,
+                    combinationKey: hasAttributes
+                      ? this.generateCombinationKey(variant.attributes!)
+                      : null,
+                    ...(hasAttributes && {
+                      attributes: {
+                        create: variant.attributes!.map((a) => ({
+                          attributeValueId: a.valueId,
+                        })),
+                      },
+                    }),
+                  },
+                });
+              })();
             }
-          }
-          return Promise.resolve();
-        });
+            return Promise.resolve();
+          });
 
-        await Promise.all(upsertPromises);
+          await Promise.all(upsertPromises);
+        }
       }
-    }
 
-    // Finally update the product basic fields
-    const product = await this.prisma.product.update({
-      where: { id },
-      data: updateData,
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        description: true,
-        productDetailsHtml: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-        categoryId: true,
-        category: { select: { id: true, name: true, slug: true } },
-        variants: {
-          where: { isDeleted: false },
-          select: {
-            id: true,
-            sku: true,
-            price: true,
-            stock: true,
-            isActive: true,
+      // Finally update the product basic fields
+      const finalProduct = await tx.product.update({
+        where: { id },
+        data: updateData,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          productDetailsHtml: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          categoryId: true,
+          category: { select: { id: true, name: true, slug: true } },
+          variants: {
+            where: { isDeleted: false },
+            select: {
+              id: true,
+              sku: true,
+              price: true,
+              stock: true,
+              isActive: true,
+            },
+          },
+          images: {
+            select: { id: true, url: true, altText: true, position: true },
           },
         },
-        images: {
-          select: { id: true, url: true, altText: true, position: true },
-        },
-      },
-    });
+      });
 
-    return { message: 'Product updated successfully', data: product };
+      return {
+        message: 'Product updated successfully',
+        data: finalProduct,
+      };
+    });
   }
 
   async remove(id: number) {

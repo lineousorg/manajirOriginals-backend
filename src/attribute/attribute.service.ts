@@ -23,13 +23,30 @@ export class AttributeService {
     status: string;
     data: Attribute;
   }> {
-    // Check if attribute with same name already exists
+    // Check if attribute with same name already exists (including soft-deleted)
     const existing = await this.prisma.attribute.findUnique({
       where: { name: dto.name },
     });
 
-    if (existing) {
+    if (existing && !existing.isDeleted) {
       throw new ConflictException('Attribute with this name already exists');
+    }
+
+    // If a soft-deleted attribute with the same name exists, restore it
+    if (existing && existing.isDeleted) {
+      const restored = await this.prisma.attribute.update({
+        where: { id: existing.id },
+        data: {
+          isDeleted: false,
+          deletedAt: null,
+          isActive: true,
+        },
+      });
+      return {
+        message: 'Attribute restored successfully',
+        status: 'success',
+        data: restored,
+      };
     }
 
     const attribute = await this.prisma.attribute.create({
@@ -46,7 +63,7 @@ export class AttributeService {
   }
 
   /**
-   * Get all attributes with their values
+   * Get all attributes with their values (excludes soft-deleted)
    */
   async findAll(): Promise<{
     message: string;
@@ -54,6 +71,7 @@ export class AttributeService {
     data: Attribute[];
   }> {
     const attributes = await this.prisma.attribute.findMany({
+      where: { isDeleted: false },
       orderBy: { name: 'asc' },
     });
 
@@ -79,12 +97,13 @@ export class AttributeService {
       where: { id },
       include: {
         values: {
+          where: { isDeleted: false },
           orderBy: { value: 'asc' },
         },
       },
     });
 
-    if (!attribute) {
+    if (!attribute || attribute.isDeleted) {
       throw new NotFoundException('Attribute not found');
     }
 
@@ -110,14 +129,14 @@ export class AttributeService {
       where: { id },
     });
 
-    if (!existingAttribute) {
+    if (!existingAttribute || existingAttribute.isDeleted) {
       throw new NotFoundException('Attribute not found');
     }
 
     // Check if new name already exists (if name is being changed)
     if (dto.name && dto.name !== existingAttribute.name) {
-      const nameExists = await this.prisma.attribute.findUnique({
-        where: { name: dto.name },
+      const nameExists = await this.prisma.attribute.findFirst({
+        where: { name: dto.name, isDeleted: false },
       });
 
       if (nameExists) {
@@ -140,8 +159,9 @@ export class AttributeService {
   }
 
   /**
-   * Delete an attribute
-   * Note: This will also delete all associated attribute values
+   * Delete an attribute (soft delete)
+   * Sets isDeleted flag instead of removing from database
+   * This preserves historical data integrity for orders and analytics
    */
   async remove(id: number): Promise<{
     message: string;
@@ -156,8 +176,16 @@ export class AttributeService {
       throw new NotFoundException('Attribute not found');
     }
 
-    await this.prisma.attribute.delete({
+    if (existingAttribute.isDeleted) {
+      throw new ConflictException('Attribute already deleted');
+    }
+
+    await this.prisma.attribute.update({
       where: { id },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
     });
 
     return {
