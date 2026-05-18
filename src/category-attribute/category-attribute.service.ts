@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -5,6 +6,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -49,6 +51,8 @@ export class CategoryAttributeService {
   /**
    * Get all attributes assigned to a category (by slug or ID).
    * Traverses parent hierarchy to include inherited attributes.
+   * Each attribute includes its selected value IDs (if in SELECTED mode)
+   * and the full list of attribute values for frontend rendering.
    */
   async getByCategorySlug(slug: string) {
     const categoryId = await this.resolveCategoryId(slug);
@@ -70,19 +74,39 @@ export class CategoryAttributeService {
             },
           },
         },
+        selectedValues: {
+          include: {
+            value: true,
+          },
+        },
       },
       orderBy: { sortOrder: 'asc' },
     });
 
+    // Map selectedValues to a flat array of value IDs for each category attribute
+    const enriched = categoryAttributes.map((ca) => ({
+      ...ca,
+      valueIds: ca.selectedValues.map((sv) => sv.valueId),
+      selectedValues: undefined,
+    }));
+
     return {
       message: 'Category attributes retrieved successfully',
       status: 'success',
-      data: categoryAttributes,
+      data: enriched,
     };
   }
 
   /**
-   * Assign an attribute to a category
+   * Assign an attribute to a category, optionally with value restriction settings.
+   *
+   * valueRestrictionMode:
+   *   - ALL      (default): all attribute values are available
+   *   - SELECTED: only the provided valueIds are available
+   *   - NONE:    no values are available
+   *
+   * When valueRestrictionMode is SELECTED, valueIds must be provided and
+   * every ID must belong to the specified attribute.
    */
   async assignAttribute(slug: string, dto: CreateCategoryAttributeDto) {
     const categoryId = await this.resolveCategoryId(slug);
@@ -110,6 +134,21 @@ export class CategoryAttributeService {
       );
     }
 
+    // Validate valueIds belong to the attribute when SELECTED mode is used
+    const mode = dto.valueRestrictionMode ?? 'ALL';
+    if (mode === 'SELECTED') {
+      if (!dto.valueIds || dto.valueIds.length === 0) {
+        throw new BadRequestException(
+          'valueIds must be provided when valueRestrictionMode is SELECTED',
+        );
+      }
+      await this.validateValueIdsBelongToAttribute(
+        dto.attributeId,
+        dto.valueIds,
+      );
+    }
+
+    // Create the category-attribute link and (optionally) its selected values
     const categoryAttribute = await this.prisma.categoryAttribute.create({
       data: {
         categoryId,
@@ -117,18 +156,34 @@ export class CategoryAttributeService {
         sortOrder: dto.sortOrder ?? 0,
         isRequired: dto.isRequired ?? false,
         isVariantSelectable: dto.isVariantSelectable ?? true,
+        valueRestrictionMode: mode,
+        ...(mode === 'SELECTED' && dto.valueIds
+          ? {
+              selectedValues: {
+                create: dto.valueIds.map((valueId) => ({ valueId })),
+              },
+            }
+          : {}),
       },
       include: {
         attribute: {
           include: { values: { where: { isDeleted: false } } },
         },
+        selectedValues: {
+          include: { value: true },
+        },
       },
     });
 
+    // Flatten selectedValues to valueIds in the response
+    const { selectedValues, ...rest } = categoryAttribute;
     return {
       message: 'Attribute assigned to category successfully',
       status: 'success',
-      data: categoryAttribute,
+      data: {
+        ...rest,
+        valueIds: selectedValues.map((sv) => sv.valueId),
+      },
     };
   }
 
@@ -168,7 +223,13 @@ export class CategoryAttributeService {
   }
 
   /**
-   * Update category attribute settings (sortOrder, isRequired, isVariantSelectable)
+   * Update category attribute settings (sortOrder, isRequired, isVariantSelectable,
+   * valueRestrictionMode, valueIds).
+   *
+   * When valueRestrictionMode is changed to SELECTED, valueIds must be provided.
+   * When valueRestrictionMode is changed away from SELECTED, existing selected values
+   * are cleared.
+   * When valueIds are provided while in SELECTED mode, existing selections are replaced.
    */
   async updateAttribute(
     slug: string,
@@ -184,10 +245,57 @@ export class CategoryAttributeService {
           attributeId,
         },
       },
+      include: {
+        selectedValues: true,
+      },
     });
 
     if (!categoryAttribute) {
       throw new NotFoundException('Attribute is not assigned to this category');
+    }
+
+    // Determine the new mode (defaults to current if not provided)
+    const newMode =
+      dto.valueRestrictionMode ?? categoryAttribute.valueRestrictionMode;
+
+    // Validate valueIds if switching to or staying in SELECTED mode
+    if (newMode === 'SELECTED') {
+      if (!dto.valueIds || dto.valueIds.length === 0) {
+        throw new BadRequestException(
+          'valueIds must be provided when valueRestrictionMode is SELECTED',
+        );
+      }
+      await this.validateValueIdsBelongToAttribute(attributeId, dto.valueIds);
+    }
+
+    // Build the update payload
+    const updateData: Record<string, unknown> = {
+      ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+      ...(dto.isRequired !== undefined && { isRequired: dto.isRequired }),
+      ...(dto.isVariantSelectable !== undefined && {
+        isVariantSelectable: dto.isVariantSelectable,
+      }),
+      ...(dto.valueRestrictionMode !== undefined && {
+        valueRestrictionMode: dto.valueRestrictionMode,
+      }),
+    };
+
+    // Handle selected values update
+    const hasValueIds = dto.valueIds !== undefined;
+    if (hasValueIds && newMode === 'SELECTED') {
+      // Replace all selected values — dto.valueIds is guarded non-undefined above
+      updateData.selectedValues = {
+        deleteMany: {},
+        create: dto?.valueIds?.map((valueId) => ({ valueId })),
+      };
+    } else if (
+      newMode !== 'SELECTED' &&
+      categoryAttribute.selectedValues.length > 0
+    ) {
+      // Clear selected values when not in SELECTED mode
+      updateData.selectedValues = {
+        deleteMany: {},
+      };
     }
 
     const updated = await this.prisma.categoryAttribute.update({
@@ -197,25 +305,59 @@ export class CategoryAttributeService {
           attributeId,
         },
       },
-      data: {
-        ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
-        ...(dto.isRequired !== undefined && { isRequired: dto.isRequired }),
-        ...(dto.isVariantSelectable !== undefined && {
-          isVariantSelectable: dto.isVariantSelectable,
-        }),
-      },
+      data: updateData,
       include: {
         attribute: {
           include: { values: { where: { isDeleted: false } } },
         },
+        selectedValues: {
+          include: { value: true },
+        },
       },
     });
 
+    // Flatten selectedValues to valueIds in the response
+    const { selectedValues, ...rest } = updated;
     return {
       message: 'Category attribute updated successfully',
       status: 'success',
-      data: updated,
+      data: {
+        ...rest,
+        valueIds: selectedValues.map((sv) => sv.valueId),
+      },
     };
+  }
+
+  /**
+   * Validate that every valueId belongs to the given attribute.
+   * Throws BadRequestException if any valueId is not found or belongs to a different attribute.
+   */
+  private async validateValueIdsBelongToAttribute(
+    attributeId: number,
+    valueIds: number[],
+  ): Promise<void> {
+    const values = await this.prisma.attributeValue.findMany({
+      where: {
+        id: { in: valueIds },
+        isDeleted: false,
+      },
+      select: { id: true, attributeId: true },
+    });
+
+    const foundIds = new Set(values.map((v) => v.id));
+    const missingIds = valueIds.filter((id) => !foundIds.has(id));
+    if (missingIds.length > 0) {
+      throw new BadRequestException(
+        `The following value IDs do not exist or are deleted: ${missingIds.join(', ')}`,
+      );
+    }
+
+    const wrongAttribute = values.find((v) => v.attributeId !== attributeId);
+    if (wrongAttribute) {
+      throw new BadRequestException(
+        `Value ${wrongAttribute.id} does not belong to attribute ${attributeId}`,
+      );
+    }
   }
 
   /**

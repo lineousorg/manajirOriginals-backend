@@ -1,0 +1,1 @@
+-- Migration stub: catagory_img_v2 (already applied in DB)

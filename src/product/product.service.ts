@@ -1,6 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -98,6 +98,7 @@ export class ProductService {
    * Validation A: Each attributeId must be assigned to the product's category
    * Validation B: Each valueId must belong to the claimed attributeId
    * Validation C: No duplicate attributeId within a single variant
+   * Validation D: Each valueId must be allowed by the category's value restriction mode
    */
   private async validateVariantAttributes(
     categoryId: number,
@@ -133,12 +134,20 @@ export class ProductService {
 
     const categoryAttributes = await this.prisma.categoryAttribute.findMany({
       where: { categoryId: { in: categoryIds } },
-      select: { attributeId: true },
+      select: { attributeId: true, valueRestrictionMode: true },
     });
 
     const allowedAttributeIds = new Set(
       categoryAttributes.map((ca) => ca.attributeId),
     );
+
+    // Build a map of attributeId -> restriction mode (first match wins, closest category)
+    const restrictionModeMap = new Map<number, string>();
+    for (const ca of categoryAttributes) {
+      if (!restrictionModeMap.has(ca.attributeId)) {
+        restrictionModeMap.set(ca.attributeId, ca.valueRestrictionMode);
+      }
+    }
 
     for (const attr of variantAttributes) {
       // Validation A: attributeId must belong to the category
@@ -164,6 +173,32 @@ export class ProductService {
           `Variant ${variantIndex}: Value ${attr.valueId} does not belong to attribute ${attr.attributeId}.`,
         );
       }
+
+      // Validation D: Check value allowance based on restriction mode
+      const restrictionMode = restrictionModeMap.get(attr.attributeId) ?? 'ALL';
+
+      if (restrictionMode === 'NONE') {
+        throw new BadRequestException(
+          `Variant ${variantIndex}: No values are allowed for attribute ${attr.attributeId} in this product's category.`,
+        );
+      }
+
+      if (restrictionMode === 'SELECTED') {
+        const isAllowed = await this.prisma.categoryAttributeValue.findFirst({
+          where: {
+            categoryId: { in: categoryIds },
+            attributeId: attr.attributeId,
+            valueId: attr.valueId,
+          },
+        });
+
+        if (!isAllowed) {
+          throw new BadRequestException(
+            `Variant ${variantIndex}: Value ${attr.valueId} is not allowed for attribute ${attr.attributeId} in this product's category.`,
+          );
+        }
+      }
+      // If restrictionMode === 'ALL', all values are allowed (no check needed)
     }
   }
 
@@ -578,6 +613,16 @@ export class ProductService {
             slug: true,
             attributes: {
               include: {
+                selectedValues: {
+                  include: {
+                    value: {
+                      select: {
+                        id: true,
+                        value: true,
+                      },
+                    },
+                  },
+                },
                 attribute: {
                   include: {
                     values: {
@@ -677,6 +722,8 @@ export class ProductService {
         name: ca.attribute.name,
         isRequired: ca.isRequired,
         isVariantSelectable: ca.isVariantSelectable,
+        valueRestrictionMode: ca.valueRestrictionMode,
+        valueIds: ca.selectedValues.map((sv) => sv.value.id),
         values: ca.attribute.values.map((v) => ({
           id: v.id,
           value: v.value,

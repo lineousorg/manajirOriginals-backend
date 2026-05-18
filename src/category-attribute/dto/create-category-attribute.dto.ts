@@ -1,4 +1,10 @@
-import { IsNumber, IsOptional, IsBoolean } from 'class-validator';
+import {
+  IsNumber,
+  IsOptional,
+  IsBoolean,
+  IsEnum,
+  IsArray,
+} from 'class-validator';
 
 export class CreateCategoryAttributeDto {
   @IsNumber()
@@ -15,6 +21,15 @@ export class CreateCategoryAttributeDto {
   @IsOptional()
   @IsBoolean()
   isVariantSelectable?: boolean;
+
+  @IsOptional()
+  @IsEnum(['ALL', 'SELECTED', 'NONE'])
+  valueRestrictionMode?: 'ALL' | 'SELECTED' | 'NONE';
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  valueIds?: number[];
 }
 
 export class UpdateCategoryAttributeDto {
@@ -29,4 +44,13 @@ export class UpdateCategoryAttributeDto {
   @IsOptional()
   @IsBoolean()
   isVariantSelectable?: boolean;
+
+  @IsOptional()
+  @IsEnum(['ALL', 'SELECTED', 'NONE'])
+  valueRestrictionMode?: 'ALL' | 'SELECTED' | 'NONE';
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  valueIds?: number[];
 }

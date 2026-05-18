@@ -40,6 +40,8 @@ export class CategoryAttributeController {
    *       "sortOrder": 0,
    *       "isRequired": false,
    *       "isVariantSelectable": true,
+   *       "valueRestrictionMode": "SELECTED",
+   *       "valueIds": [1, 2],
    *       "attribute": {
    *         "id": 1,
    *         "name": "Color",
@@ -66,8 +68,15 @@ export class CategoryAttributeController {
    *   "attributeId": 1,
    *   "sortOrder": 0,
    *   "isRequired": false,
-   *   "isVariantSelectable": true
+   *   "isVariantSelectable": true,
+   *   "valueRestrictionMode": "SELECTED",  // "ALL" | "SELECTED" | "NONE"
+   *   "valueIds": [1, 2, 3]                // required when mode is "SELECTED"
    * }
+   *
+   * valueRestrictionMode:
+   *   ALL      - all attribute values are available (default, backward compatible)
+   *   SELECTED - only the provided valueIds are available
+   *   NONE     - no values are available (attribute effectively disabled)
    */
   @Post(':slug/attributes')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -80,7 +89,8 @@ export class CategoryAttributeController {
   }
 
   /**
-   * Update category attribute settings (sortOrder, isRequired, isVariantSelectable)
+   * Update category attribute settings (sortOrder, isRequired, isVariantSelectable,
+   * valueRestrictionMode, valueIds)
    * PATCH /categories/:slug/attributes/:attributeId
    */
   @Patch(':slug/attributes/:attributeId')

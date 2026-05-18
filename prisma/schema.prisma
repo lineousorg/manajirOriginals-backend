@@ -115,33 +115,51 @@ model Attribute {
   deletedAt           DateTime?
   values              AttributeValue[]
   categoryAttributes  CategoryAttribute[]
+
+  @@index([name])
 }
 
 model AttributeValue {
-  id          Int                @id @default(autoincrement())
-  value       String
-  attributeId Int
-  isActive    Boolean            @default(true)
-  isDeleted   Boolean            @default(false)
-  deletedAt   DateTime?
-  attribute   Attribute          @relation(fields: [attributeId], references: [id])
-  variants    VariantAttribute[]
+  id                       Int                @id @default(autoincrement())
+  value                    String
+  attributeId              Int
+  isActive                 Boolean            @default(true)
+  isDeleted                Boolean            @default(false)
+  deletedAt                DateTime?
+  attribute                Attribute          @relation(fields: [attributeId], references: [id])
+  variants                 VariantAttribute[]
+  categoryAttributeValues  CategoryAttributeValue[]
 
   @@index([attributeId])
 }
 
 model CategoryAttribute {
-  categoryId  Int
-  attributeId Int
-  sortOrder   Int     @default(0)
-  isRequired  Boolean @default(false)
-  isVariantSelectable Boolean @default(true)
-  category    Category  @relation(fields: [categoryId], references: [id])
-  attribute   Attribute @relation(fields: [attributeId], references: [id])
+  categoryId           Int
+  attributeId          Int
+  sortOrder            Int              @default(0)
+  isRequired           Boolean          @default(false)
+  isVariantSelectable  Boolean          @default(true)
+  valueRestrictionMode ValueRestrictionMode @default(ALL)
+  category             Category         @relation(fields: [categoryId], references: [id])
+  attribute            Attribute        @relation(fields: [attributeId], references: [id])
+  selectedValues       CategoryAttributeValue[]
 
   @@id([categoryId, attributeId])
   @@index([categoryId])
   @@index([attributeId])
+}
+
+model CategoryAttributeValue {
+  categoryId     Int
+  attributeId    Int
+  valueId        Int
+  value          AttributeValue   @relation(fields: [valueId], references: [id])
+  categoryAttribute CategoryAttribute? @relation(fields: [categoryId, attributeId], references: [categoryId, attributeId])
+
+  @@id([categoryId, attributeId, valueId])
+  @@index([categoryId, attributeId])
+  @@index([attributeId, valueId])
+  @@index([valueId])
 }
 
 model VariantAttribute {
@@ -293,4 +311,10 @@ enum DeliveryType {
 enum DiscountType {
   PERCENTAGE
   FIXED
+}
+
+enum ValueRestrictionMode {
+  ALL
+  SELECTED
+  NONE
 }
