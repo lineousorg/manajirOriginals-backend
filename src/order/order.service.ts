@@ -570,12 +570,9 @@ export class OrderService {
 
         // Validate reservation ownership: for guest reservations, check guestTokenHash
         if (reservation.userId) {
-          // Authenticated user reservation
-          if (reservation.userId !== guestUser.id) {
-            throw new BadRequestException(
-              `Reservation ${item.reservationId} does not belong to this guest`,
-            );
-          }
+          throw new BadRequestException(
+            `Reservation ${item.reservationId} belongs to an authenticated user and cannot be used for guest checkout`,
+          );
         } else {
           // Guest reservation - validate by guestTokenHash
           if (!dto.guestToken) {

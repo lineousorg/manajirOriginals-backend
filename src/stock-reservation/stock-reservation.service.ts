@@ -27,6 +27,15 @@ export class StockReservationService {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 
+  private buildGuestTokenWhere(guestToken: string) {
+    return {
+      OR: [
+        { guestTokenHash: this.hashToken(guestToken) },
+        { guestToken },
+      ],
+    };
+  }
+
   /**
    * Reserve stock for a user or guest
    * Creates a reservation and decrements actual stock
@@ -158,8 +167,8 @@ export class StockReservationService {
         // Authenticated user - match by userId
         query.userId = userId;
       } else if (guestToken) {
-        // Guest session - match by guestToken
-        query.guestToken = guestToken;
+        // Guest session - match by guest token/hash
+        Object.assign(query, this.buildGuestTokenWhere(guestToken));
       } else {
         throw new BadRequestException(
           'Reservation release requires authentication or a guest session token',
@@ -312,7 +321,7 @@ export class StockReservationService {
     if (userId) {
       query.userId = userId;
     } else if (guestToken) {
-      query.guestToken = guestToken;
+      Object.assign(query, this.buildGuestTokenWhere(guestToken));
     } else {
       return {
         message: 'No active reservations',
@@ -572,7 +581,11 @@ export class StockReservationService {
   /**
    * Get reservation by ID
    */
-  async getReservationById(reservationId: number) {
+  async getReservationById(
+    reservationId: number,
+    userId: number,
+    role: string,
+  ) {
     const reservation = await this.prisma.stockReservation.findUnique({
       where: { id: reservationId },
       include: {
@@ -594,6 +607,10 @@ export class StockReservationService {
     });
 
     if (!reservation) {
+      throw new NotFoundException('Reservation not found');
+    }
+
+    if (role !== 'ADMIN' && reservation.userId !== userId) {
       throw new NotFoundException('Reservation not found');
     }
 
@@ -698,7 +715,7 @@ export class StockReservationService {
       // Find all active reservations for this guest token
       const guestReservations = await tx.stockReservation.findMany({
         where: {
-          guestToken,
+          ...this.buildGuestTokenWhere(guestToken),
           status: 'ACTIVE',
           expiresAt: { gt: new Date() },
         },

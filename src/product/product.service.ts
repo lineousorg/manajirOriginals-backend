@@ -34,6 +34,64 @@ export class ProductService {
     private cloudinaryService: CloudinaryService,
   ) {}
 
+  private async validateVariantAttributePayload(
+    variants: Array<{ attributes?: Array<{ attributeId: number; valueId: number }> }>,
+  ): Promise<void> {
+    const attributePairs = variants.flatMap((variant) => variant.attributes ?? []);
+
+    if (attributePairs.length === 0) {
+      return;
+    }
+
+    const valueIds = [...new Set(attributePairs.map((attr) => attr.valueId))];
+    const attributeValues = await this.prisma.attributeValue.findMany({
+      where: { id: { in: valueIds } },
+      select: { id: true, attributeId: true },
+    });
+    const attributeValueMap = new Map(
+      attributeValues.map((value) => [value.id, value.attributeId]),
+    );
+
+    if (attributeValues.length !== valueIds.length) {
+      const missingIds = valueIds.filter((id) => !attributeValueMap.has(id));
+      throw new BadRequestException(
+        `Invalid attribute value IDs: ${missingIds.join(', ')}`,
+      );
+    }
+
+    for (const variant of variants) {
+      if (!variant.attributes || variant.attributes.length === 0) {
+        continue;
+      }
+
+      const seenAttributeIds = new Set<number>();
+      const seenValueIds = new Set<number>();
+
+      for (const attribute of variant.attributes) {
+        if (seenAttributeIds.has(attribute.attributeId)) {
+          throw new BadRequestException(
+            `Duplicate attribute ${attribute.attributeId} provided for a variant`,
+          );
+        }
+        if (seenValueIds.has(attribute.valueId)) {
+          throw new BadRequestException(
+            `Duplicate attribute value ${attribute.valueId} provided for a variant`,
+          );
+        }
+
+        seenAttributeIds.add(attribute.attributeId);
+        seenValueIds.add(attribute.valueId);
+
+        const actualAttributeId = attributeValueMap.get(attribute.valueId);
+        if (actualAttributeId !== attribute.attributeId) {
+          throw new BadRequestException(
+            `Attribute value ${attribute.valueId} does not belong to attribute ${attribute.attributeId}`,
+          );
+        }
+      }
+    }
+  }
+
   /**
    * Calculate variant pricing with discount validation
    * Delegates to shared PricingService for consistency
@@ -84,6 +142,8 @@ export class ProductService {
     if (existingProduct) {
       throw new ConflictException('Product with this slug already exists');
     }
+
+    await this.validateVariantAttributePayload(dto.variants ?? []);
 
     const product = await this.prisma.product.create({
       data: {
@@ -533,6 +593,17 @@ export class ProductService {
   async update(id: number, dto: UpdateProductDto) {
     const { categoryId, variants, images, ...rest } = dto;
 
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    await this.validateVariantAttributePayload(variants ?? []);
+
     // Determine if we need a transaction (only for images/variants changes)
     const needsTransaction =
       (variants && variants.length > 0) || (images && images.length > 0);
@@ -579,204 +650,193 @@ export class ProductService {
       return { message: 'Product updated successfully', data: updatedProduct };
     }
 
-    // Run operations sequentially (no transaction - more reliable)
-    // 1. Update basic product fields first
+    // Run the aggregate update in a single transaction so partial writes do not persist
     const updateData: any = { ...rest };
     if (categoryId) {
       updateData.category = { connect: { id: categoryId } };
     }
 
-    // 2. Handle images - update existing or add new ones
-    if (images && images.length > 0) {
-      const imagesToUpdate = images.filter((img) => img.id);
-      const imagesToCreate = images.filter((img) => !img.id);
+    const product = await this.prisma.$transaction(async (tx) => {
+      if (images && images.length > 0) {
+        const imagesToUpdate = images.filter((img) => img.id);
+        const imagesToCreate = images.filter((img) => !img.id);
 
-      // Update all images in parallel
-      if (imagesToUpdate.length > 0) {
-        await Promise.all(
-          imagesToUpdate.map((img) =>
-            this.prisma.image.update({
-              where: { id: img.id },
-              data: {
-                url: img.url,
-                publicId: img.publicId ?? null,
-                altText: img.altText ?? null,
-                position: img.position ?? 0,
-              },
-            }),
-          ),
-        );
+        for (const img of imagesToUpdate) {
+          await tx.image.update({
+            where: { id: img.id },
+            data: {
+              url: img.url,
+              publicId: img.publicId ?? null,
+              altText: img.altText ?? null,
+              position: img.position ?? 0,
+            },
+          });
+        }
+
+        if (imagesToCreate.length > 0) {
+          await tx.image.createMany({
+            data: imagesToCreate.map((img, index) => ({
+              productId: id,
+              url: img.url,
+              publicId: img.publicId ?? null,
+              altText: img.altText ?? null,
+              position: img.position ?? index,
+              type: 'PRODUCT',
+            })),
+          });
+        }
       }
 
-      // Create new images
-      if (imagesToCreate.length > 0) {
-        await this.prisma.image.createMany({
-          data: imagesToCreate.map((img, index) => ({
-            productId: id,
-            url: img.url,
-            publicId: img.publicId ?? null,
-            altText: img.altText ?? null,
-            position: img.position ?? index,
-            type: 'PRODUCT',
-          })),
+      if (variants && variants.length > 0) {
+        const existingVariants = await tx.productVariant.findMany({
+          where: { productId: id, isDeleted: false },
+          select: { id: true, sku: true },
         });
-      }
-    }
 
-    // 3. Handle variants - optimized with parallel queries
-    if (variants && variants.length > 0) {
-      // Fetch existing variants once
-      const existingVariants = await this.prisma.productVariant.findMany({
-        where: { productId: id, isDeleted: false },
-        select: { id: true, sku: true },
-      });
-
-      const existingVariantMap = new Map(
-        existingVariants.map((v) => [v.sku, v.id]),
-      );
-
-      // Separate variants with IDs (update) and without IDs (upsert by SKU)
-      const variantsToUpdate = variants.filter((v) => v.id);
-      const variantsToUpsert = variants.filter((v) => !v.id);
-
-      // Update existing variants by ID in parallel
-      if (variantsToUpdate.length > 0) {
-        await Promise.all(
-          variantsToUpdate.map((variant) =>
-            variant.id
-              ? this.prisma.productVariant.update({
-                  where: { id: variant.id },
-                  data: {
-                    ...(variant.price !== undefined && {
-                      price: variant.price,
-                    }),
-                    ...(variant.stock !== undefined && {
-                      stock: variant.stock,
-                    }),
-                    ...(variant.sku !== undefined && { sku: variant.sku }),
-                    // Discount fields
-                    ...(variant.discountType !== undefined && {
-                      discountType: variant.discountType,
-                    }),
-                    ...(variant.discountValue !== undefined && {
-                      discountValue: variant.discountValue,
-                    }),
-                    ...(variant.discountStart !== undefined && {
-                      discountStart: variant.discountStart
-                        ? new Date(variant.discountStart)
-                        : null,
-                    }),
-                    ...(variant.discountEnd !== undefined && {
-                      discountEnd: variant.discountEnd
-                        ? new Date(variant.discountEnd)
-                        : null,
-                    }),
-                  },
-                })
-              : Promise.resolve(),
-          ),
+        const existingVariantMap = new Map(
+          existingVariants.map((v) => [v.sku, v.id]),
         );
-      }
+        const variantsToUpdate = variants.filter((v) => v.id);
+        const variantsToUpsert = variants.filter((v) => !v.id);
 
-      // Upsert variants by checking if SKU exists - in parallel
-      if (variantsToUpsert.length > 0) {
-        const upsertPromises = variantsToUpsert.map((variant) => {
-          if (variant.sku && variant.price !== undefined) {
-            const existingId = existingVariantMap.get(variant.sku);
-            if (existingId) {
-              return this.prisma.productVariant.update({
-                where: { id: existingId },
-                data: {
-                  price: variant.price,
-                  stock: variant.stock ?? 0,
-                  // Discount fields
-                  ...(variant.discountType !== undefined && {
-                    discountType: variant.discountType,
-                  }),
-                  ...(variant.discountValue !== undefined && {
-                    discountValue: variant.discountValue,
-                  }),
-                  ...(variant.discountStart !== undefined && {
-                    discountStart: variant.discountStart
-                      ? new Date(variant.discountStart)
-                      : null,
-                  }),
-                  ...(variant.discountEnd !== undefined && {
-                    discountEnd: variant.discountEnd
-                      ? new Date(variant.discountEnd)
-                      : null,
-                  }),
-                },
-              });
-            } else {
-              // Create new variant with attributes
-              const hasAttributes =
-                variant.attributes && variant.attributes.length > 0;
-              return this.prisma.productVariant.create({
-                data: {
-                  productId: id,
-                  sku: variant.sku,
-                  price: variant.price,
-                  stock: variant.stock ?? 0,
-                  isActive: true,
-                  isDeleted: false,
-                  // Discount fields
-                  discountType: variant.discountType ?? null,
-                  discountValue: variant.discountValue ?? null,
+        for (const variant of variantsToUpdate) {
+          if (!variant.id) {
+            continue;
+          }
+
+          if (!existingVariants.some((existing) => existing.id === variant.id)) {
+            throw new NotFoundException(
+              `Variant ${variant.id} not found for product ${id}`,
+            );
+          }
+
+          if (variant.attributes && variant.attributes.length > 0) {
+            throw new BadRequestException(
+              `Updating attributes for existing variant ${variant.id} is not supported in this endpoint`,
+            );
+          }
+
+          await tx.productVariant.update({
+            where: { id: variant.id },
+            data: {
+              ...(variant.price !== undefined && {
+                price: variant.price,
+              }),
+              ...(variant.stock !== undefined && {
+                stock: variant.stock,
+              }),
+              ...(variant.sku !== undefined && { sku: variant.sku }),
+              ...(variant.discountType !== undefined && {
+                discountType: variant.discountType,
+              }),
+              ...(variant.discountValue !== undefined && {
+                discountValue: variant.discountValue,
+              }),
+              ...(variant.discountStart !== undefined && {
+                discountStart: variant.discountStart
+                  ? new Date(variant.discountStart)
+                  : null,
+              }),
+              ...(variant.discountEnd !== undefined && {
+                discountEnd: variant.discountEnd
+                  ? new Date(variant.discountEnd)
+                  : null,
+              }),
+            },
+          });
+        }
+
+        for (const variant of variantsToUpsert) {
+          if (!(variant.sku && variant.price !== undefined)) {
+            continue;
+          }
+
+          const existingId = existingVariantMap.get(variant.sku);
+          if (existingId) {
+            await tx.productVariant.update({
+              where: { id: existingId },
+              data: {
+                price: variant.price,
+                stock: variant.stock ?? 0,
+                ...(variant.discountType !== undefined && {
+                  discountType: variant.discountType,
+                }),
+                ...(variant.discountValue !== undefined && {
+                  discountValue: variant.discountValue,
+                }),
+                ...(variant.discountStart !== undefined && {
                   discountStart: variant.discountStart
                     ? new Date(variant.discountStart)
                     : null,
+                }),
+                ...(variant.discountEnd !== undefined && {
                   discountEnd: variant.discountEnd
                     ? new Date(variant.discountEnd)
                     : null,
-                  // Connect attributes if provided
-                  ...(hasAttributes && {
-                    attributes: {
-                      create: variant.attributes!.map((attr) => ({
-                        attributeValueId: attr.valueId,
-                      })),
-                    },
-                  }),
-                },
-              });
-            }
+                }),
+              },
+            });
+          } else {
+            const hasAttributes =
+              variant.attributes && variant.attributes.length > 0;
+            await tx.productVariant.create({
+              data: {
+                productId: id,
+                sku: variant.sku,
+                price: variant.price,
+                stock: variant.stock ?? 0,
+                isActive: true,
+                isDeleted: false,
+                discountType: variant.discountType ?? null,
+                discountValue: variant.discountValue ?? null,
+                discountStart: variant.discountStart
+                  ? new Date(variant.discountStart)
+                  : null,
+                discountEnd: variant.discountEnd
+                  ? new Date(variant.discountEnd)
+                  : null,
+                ...(hasAttributes && {
+                  attributes: {
+                    create: variant.attributes!.map((attr) => ({
+                      attributeValueId: attr.valueId,
+                    })),
+                  },
+                }),
+              },
+            });
           }
-          return Promise.resolve();
-        });
-
-        await Promise.all(upsertPromises);
+        }
       }
-    }
 
-    // Finally update the product basic fields
-    const product = await this.prisma.product.update({
-      where: { id },
-      data: updateData,
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        description: true,
-        productDetailsHtml: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-        categoryId: true,
-        category: { select: { id: true, name: true, slug: true } },
-        variants: {
-          where: { isDeleted: false },
-          select: {
-            id: true,
-            sku: true,
-            price: true,
-            stock: true,
-            isActive: true,
+      return tx.product.update({
+        where: { id },
+        data: updateData,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          productDetailsHtml: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          categoryId: true,
+          category: { select: { id: true, name: true, slug: true } },
+          variants: {
+            where: { isDeleted: false },
+            select: {
+              id: true,
+              sku: true,
+              price: true,
+              stock: true,
+              isActive: true,
+            },
+          },
+          images: {
+            select: { id: true, url: true, altText: true, position: true },
           },
         },
-        images: {
-          select: { id: true, url: true, altText: true, position: true },
-        },
-      },
+      });
     });
 
     return { message: 'Product updated successfully', data: product };

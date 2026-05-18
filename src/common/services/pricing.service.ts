@@ -108,38 +108,23 @@ export class PricingService {
     quantity: number,
     reservationId?: number | null,
   ): OrderItemPricing {
-    // Calculate discount
-    const basePrice = Number(variant.price);
-    let finalPrice = basePrice;
-    let discountAmount = 0;
+    const pricing = this.calculateVariantPricing(variant, new Date());
     let discountPercentage: number | null = null;
 
-    // Check if discount is active (same logic as calculateVariantPricing)
-    const now = new Date();
-    if (
-      variant.discountType &&
-      variant.discountValue &&
-      (!variant.discountStart || now >= new Date(variant.discountStart)) &&
-      (!variant.discountEnd || now <= new Date(variant.discountEnd))
-    ) {
-      const discountValue = Number(variant.discountValue);
-      if (variant.discountType === 'PERCENTAGE') {
-        discountAmount = (basePrice * discountValue) / 100;
-        discountPercentage = discountValue;
-      } else if (variant.discountType === 'FIXED') {
-        discountAmount = discountValue;
-      }
-      finalPrice = Math.max(0, basePrice - discountAmount);
+    if (pricing.hasDiscount && pricing.discountType === 'PERCENTAGE') {
+      const rawDiscountValue =
+        variant.discountValue != null ? Number(variant.discountValue) : 0;
+      discountPercentage = Math.min(100, Math.max(0, rawDiscountValue));
     }
 
-    const itemTotal = finalPrice * quantity;
+    const itemTotal = pricing.finalPrice * quantity;
 
     return {
       variantId: variant.id,
       quantity,
-      price: finalPrice,
-      originalPrice: basePrice,
-      discountAmount: discountAmount || null,
+      price: pricing.finalPrice,
+      originalPrice: pricing.basePrice,
+      discountAmount: pricing.discountAmount || null,
       discountPercentage,
       reservationId: reservationId || null,
       itemTotal,

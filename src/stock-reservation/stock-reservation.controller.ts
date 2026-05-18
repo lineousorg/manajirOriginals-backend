@@ -28,6 +28,7 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Role } from '@prisma/client';
 import * as crypto from 'crypto';
+import { Roles } from '../auth/roles.decorator';
 
 /**
  * Extended request with optional user from JWT
@@ -120,6 +121,7 @@ export class StockReservationController {
    * For guests, provide guestToken as query parameter
    */
   @Get('my-reservations')
+  @UseGuards(OptionalJwtAuthGuard)
   async getMyReservations(
     @Request() req: RequestWithUser,
     @Query('guestToken') guestToken?: string,
@@ -155,8 +157,12 @@ export class StockReservationController {
    */
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  async getReservation(@Param('id') id: string, @Request() req) {
-    return this.stockReservationService.getReservationById(Number(id));
+  async getReservation(@Param('id') id: string, @Request() req: RequestWithUser) {
+    return this.stockReservationService.getReservationById(
+      Number(id),
+      req.user!.id,
+      req.user!.role,
+    );
   }
 
   /**
@@ -194,6 +200,7 @@ export class StockReservationController {
    * POST /stock-reservation/force-clean
    */
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   @Post('force-clean')
   async forceCleanReservations() {
     return this.stockReservationService.forceCleanAllReservations();
