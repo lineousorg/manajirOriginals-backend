@@ -10,6 +10,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DiscountType } from '@prisma/client';
+import { ProductHasVariants } from './validators/product-has-variants.validator';
+import { VariantHasAttributes } from './validators/variant-has-attributes.validator';
 
 export class UpdateProductVariantDto {
   @IsOptional()
@@ -116,6 +118,11 @@ export class UpdateProductDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => UpdateProductVariantDto)
+  @ProductHasVariants({
+    message:
+      'Product must have at least one variant when variants are provided',
+  })
+  @VariantHasAttributes({ each: true })
   variants?: UpdateProductVariantDto[];
 
   @IsOptional()

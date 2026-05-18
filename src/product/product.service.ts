@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -32,16 +32,31 @@ export class ProductService {
     private pricingService: PricingService,
     private fileService: FileService,
     private cloudinaryService: CloudinaryService,
-  ) {}
+  ) { }
 
   private async validateVariantAttributePayload(
-    variants: Array<{ attributes?: Array<{ attributeId: number; valueId: number }> }>,
+    variants: Array<{
+      attributes?: Array<{ attributeId: number; valueId: number }>;
+    }>,
   ): Promise<void> {
-    const attributePairs = variants.flatMap((variant) => variant.attributes ?? []);
-
-    if (attributePairs.length === 0) {
-      return;
+    // NEW: Check if variants array is empty
+    if (!variants || variants.length === 0) {
+      throw new BadRequestException('Product must have at least one variant');
     }
+
+    // Check if any variant has no attributes
+    for (const variant of variants) {
+      if (!variant.attributes || variant.attributes.length === 0) {
+        throw new BadRequestException(
+          'Each variant must have at least one attribute',
+        );
+      }
+    }
+
+    // Existing validation logic...
+    const attributePairs = variants.flatMap(
+      (variant) => variant.attributes ?? [],
+    );
 
     const valueIds = [...new Set(attributePairs.map((attr) => attr.valueId))];
     const attributeValues = await this.prisma.attributeValue.findMany({
@@ -61,7 +76,7 @@ export class ProductService {
 
     for (const variant of variants) {
       if (!variant.attributes || variant.attributes.length === 0) {
-        continue;
+        continue; // This shouldn't happen due to check above, but keeping for safety
       }
 
       const seenAttributeIds = new Set<number>();
@@ -143,21 +158,26 @@ export class ProductService {
       throw new ConflictException('Product with this slug already exists');
     }
 
-    await this.validateVariantAttributePayload(dto.variants ?? []);
+    // Handle undefined variants case
+    if (!dto.variants) {
+      throw new BadRequestException('Product must have at least one variant');
+    }
+
+    await this.validateVariantAttributePayload(dto.variants);
 
     const product = await this.prisma.product.create({
       data: {
         name: dto.name,
         images: dto.images
           ? {
-              create: dto.images.map((img, index) => ({
-                url: img.url,
-                publicId: img.publicId ?? null,
-                altText: img.altText ?? null,
-                position: img.position ?? index,
-                type: 'PRODUCT',
-              })),
-            }
+            create: dto.images.map((img, index) => ({
+              url: img.url,
+              publicId: img.publicId ?? null,
+              altText: img.altText ?? null,
+              position: img.position ?? index,
+              type: 'PRODUCT',
+            })),
+          }
           : undefined,
         description: dto.description,
         productDetailsHtml: dto.productDetailsHtml ?? null,
@@ -167,30 +187,30 @@ export class ProductService {
         slug: dto.slug,
         variants: dto.variants
           ? {
-              create: dto.variants.map((v: VariantWithAttributesDto) => ({
-                sku:
-                  v.sku ??
-                  `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                price: v.price,
-                stock: v.stock,
-                isActive: v.isActive ?? true,
-                isDeleted: false,
-                // Discount fields
-                discountType: v.discountType ?? null,
-                discountValue: v.discountValue ?? null,
-                discountStart: v.discountStart
-                  ? new Date(v.discountStart)
-                  : null,
-                discountEnd: v.discountEnd ? new Date(v.discountEnd) : null,
-                ...(v.attributes && {
-                  attributes: {
-                    create: v.attributes.map((a) => ({
-                      attributeValueId: a.valueId,
-                    })),
-                  },
-                }),
-              })),
-            }
+            create: dto.variants.map((v: VariantWithAttributesDto) => ({
+              sku:
+                v.sku ??
+                `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              price: v.price,
+              stock: v.stock,
+              isActive: v.isActive ?? true,
+              isDeleted: false,
+              // Discount fields
+              discountType: v.discountType ?? null,
+              discountValue: v.discountValue ?? null,
+              discountStart: v.discountStart
+                ? new Date(v.discountStart)
+                : null,
+              discountEnd: v.discountEnd ? new Date(v.discountEnd) : null,
+              ...(v.attributes && {
+                attributes: {
+                  create: v.attributes.map((a) => ({
+                    attributeValueId: a.valueId,
+                  })),
+                },
+              }),
+            })),
+          }
           : undefined,
       },
       include: {
@@ -430,8 +450,8 @@ export class ProductService {
     const stockInfo =
       allVariantIds.length > 0
         ? await this.stockReservationService.getAvailableStockBulk(
-            allVariantIds,
-          )
+          allVariantIds,
+        )
         : [];
     const stockMap = new Map(stockInfo.map((s) => [s.variantId, s]));
 
@@ -602,7 +622,10 @@ export class ProductService {
       throw new NotFoundException('Product not found');
     }
 
-    await this.validateVariantAttributePayload(variants ?? []);
+    // Only validate variants if explicitly provided in update request
+    if (variants !== undefined) {
+      await this.validateVariantAttributePayload(variants);
+    }
 
     // Determine if we need a transaction (only for images/variants changes)
     const needsTransaction =
@@ -704,7 +727,9 @@ export class ProductService {
             continue;
           }
 
-          if (!existingVariants.some((existing) => existing.id === variant.id)) {
+          if (
+            !existingVariants.some((existing) => existing.id === variant.id)
+          ) {
             throw new NotFoundException(
               `Variant ${variant.id} not found for product ${id}`,
             );
@@ -864,7 +889,7 @@ export class ProductService {
       if (activeReservations > 0) {
         throw new BadRequestException(
           `Cannot delete product: ${activeReservations} active reservation(s) found on its variants. ` +
-            `Please wait for reservations to expire or release them first.`,
+          `Please wait for reservations to expire or release them first.`,
         );
       }
     }
@@ -957,7 +982,7 @@ export class ProductService {
     if (activeReservations > 0) {
       throw new BadRequestException(
         `Cannot delete variant: ${activeReservations} active reservation(s) found. ` +
-          `Please wait for reservations to expire or release them first.`,
+        `Please wait for reservations to expire or release them first.`,
       );
     }
 

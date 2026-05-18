@@ -1224,7 +1224,7 @@ export class OrderService {
                 reservation.status === 'EXPIRED'
               ) {
                 // Already released/expired - no action needed, but log for debugging
-                // eslint-disable-next-line no-console
+
                 console.log(
                   `[OrderCancellation] Reservation ${item.reservationId} already ${reservation.status}, skipping`,
                 );
@@ -1233,7 +1233,7 @@ export class OrderService {
                   where: { id: item.variantId },
                   data: { stock: { increment: item.quantity } },
                 });
-                // eslint-disable-next-line no-console
+
                 console.warn(
                   `[OrderCancellation] Reservation ${item.reservationId} is ACTIVE during cancellation - marking as RELEASED`,
                 );
@@ -1244,7 +1244,7 @@ export class OrderService {
               }
             } else {
               // Reservation doesn't exist - shouldn't happen but handle gracefully
-              // eslint-disable-next-line no-console
+
               console.warn(
                 `[OrderCancellation] Reservation ${item.reservationId} not found for order ${id}`,
               );
@@ -1263,7 +1263,6 @@ export class OrderService {
                 data: { stock: { increment: item.quantity } },
               });
             } else {
-              // eslint-disable-next-line no-console
               console.warn(
                 `[OrderCancellation] Skipped stock restore for variant ${item.variantId} - variant deleted or not found`,
               );

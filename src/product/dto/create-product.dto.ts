@@ -8,6 +8,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ProductHasVariants } from './validators/product-has-variants.validator';
+import { VariantHasAttributes } from './validators/variant-has-attributes.validator';
 
 export class CreateProductImageDto {
   @IsString()
@@ -50,7 +52,11 @@ export class CreateProductDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => VariantWithAttributesDto)
-  variants?: VariantWithAttributesDto[];
+  @ProductHasVariants
+  @ValidateNested({ each: true })
+  @Type(() => VariantWithAttributesDto)
+  @VariantHasAttributes({ each: true })
+  variants!: VariantWithAttributesDto[];
 
   @IsArray()
   @ValidateNested({ each: true })

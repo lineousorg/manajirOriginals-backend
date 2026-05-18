@@ -157,7 +157,10 @@ export class StockReservationController {
    */
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  async getReservation(@Param('id') id: string, @Request() req: RequestWithUser) {
+  async getReservation(
+    @Param('id') id: string,
+    @Request() req: RequestWithUser,
+  ) {
     return this.stockReservationService.getReservationById(
       Number(id),
       req.user!.id,

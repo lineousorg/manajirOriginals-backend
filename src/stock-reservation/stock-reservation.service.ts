@@ -29,10 +29,7 @@ export class StockReservationService {
 
   private buildGuestTokenWhere(guestToken: string) {
     return {
-      OR: [
-        { guestTokenHash: this.hashToken(guestToken) },
-        { guestToken },
-      ],
+      OR: [{ guestTokenHash: this.hashToken(guestToken) }, { guestToken }],
     };
   }
 
