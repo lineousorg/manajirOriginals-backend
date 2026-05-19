@@ -14,3 +14,5 @@ export class ProductHasVariantsValidator implements ValidatorConstraintInterface
     return 'Product must have at least one variant';
   }
 }
+
+export { ProductHasVariantsValidator as ProductHasVariants };

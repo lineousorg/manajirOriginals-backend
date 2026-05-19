@@ -32,7 +32,7 @@ export class ProductService {
     private pricingService: PricingService,
     private fileService: FileService,
     private cloudinaryService: CloudinaryService,
-  ) { }
+  ) {}
 
   private async validateVariantAttributePayload(
     variants: Array<{
@@ -170,14 +170,14 @@ export class ProductService {
         name: dto.name,
         images: dto.images
           ? {
-            create: dto.images.map((img, index) => ({
-              url: img.url,
-              publicId: img.publicId ?? null,
-              altText: img.altText ?? null,
-              position: img.position ?? index,
-              type: 'PRODUCT',
-            })),
-          }
+              create: dto.images.map((img, index) => ({
+                url: img.url,
+                publicId: img.publicId ?? null,
+                altText: img.altText ?? null,
+                position: img.position ?? index,
+                type: 'PRODUCT',
+              })),
+            }
           : undefined,
         description: dto.description,
         productDetailsHtml: dto.productDetailsHtml ?? null,
@@ -187,30 +187,30 @@ export class ProductService {
         slug: dto.slug,
         variants: dto.variants
           ? {
-            create: dto.variants.map((v: VariantWithAttributesDto) => ({
-              sku:
-                v.sku ??
-                `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              price: v.price,
-              stock: v.stock,
-              isActive: v.isActive ?? true,
-              isDeleted: false,
-              // Discount fields
-              discountType: v.discountType ?? null,
-              discountValue: v.discountValue ?? null,
-              discountStart: v.discountStart
-                ? new Date(v.discountStart)
-                : null,
-              discountEnd: v.discountEnd ? new Date(v.discountEnd) : null,
-              ...(v.attributes && {
-                attributes: {
-                  create: v.attributes.map((a) => ({
-                    attributeValueId: a.valueId,
-                  })),
-                },
-              }),
-            })),
-          }
+              create: dto.variants.map((v: VariantWithAttributesDto) => ({
+                sku:
+                  v.sku ??
+                  `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                price: v.price,
+                stock: v.stock,
+                isActive: v.isActive ?? true,
+                isDeleted: false,
+                // Discount fields
+                discountType: v.discountType ?? null,
+                discountValue: v.discountValue ?? null,
+                discountStart: v.discountStart
+                  ? new Date(v.discountStart)
+                  : null,
+                discountEnd: v.discountEnd ? new Date(v.discountEnd) : null,
+                ...(v.attributes && {
+                  attributes: {
+                    create: v.attributes.map((a) => ({
+                      attributeValueId: a.valueId,
+                    })),
+                  },
+                }),
+              })),
+            }
           : undefined,
       },
       include: {
@@ -450,8 +450,8 @@ export class ProductService {
     const stockInfo =
       allVariantIds.length > 0
         ? await this.stockReservationService.getAvailableStockBulk(
-          allVariantIds,
-        )
+            allVariantIds,
+          )
         : [];
     const stockMap = new Map(stockInfo.map((s) => [s.variantId, s]));
 
@@ -889,7 +889,7 @@ export class ProductService {
       if (activeReservations > 0) {
         throw new BadRequestException(
           `Cannot delete product: ${activeReservations} active reservation(s) found on its variants. ` +
-          `Please wait for reservations to expire or release them first.`,
+            `Please wait for reservations to expire or release them first.`,
         );
       }
     }
@@ -982,7 +982,7 @@ export class ProductService {
     if (activeReservations > 0) {
       throw new BadRequestException(
         `Cannot delete variant: ${activeReservations} active reservation(s) found. ` +
-        `Please wait for reservations to expire or release them first.`,
+          `Please wait for reservations to expire or release them first.`,
       );
     }
 
