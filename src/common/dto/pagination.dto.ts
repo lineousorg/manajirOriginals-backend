@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsOptional, IsInt, Min, Max, IsBoolean } from 'class-validator';
+import {
+  IsOptional,
+  IsInt,
+  Min,
+  Max,
+  IsBoolean,
+  IsString,
+} from 'class-validator';
 
 export class PaginationQueryDto {
   @IsOptional()
@@ -24,6 +31,13 @@ export class PaginationQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   includeStock?: boolean = true;
+
+  /**
+   * Optional search term for filtering products by name (case-insensitive partial match)
+   */
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export interface PaginatedResponse<T> {

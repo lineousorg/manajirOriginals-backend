@@ -247,16 +247,27 @@ export class ProductService {
     pagination: PaginationQueryDto,
   ): Promise<PaginatedResponse<any>> {
     // findAll method
-    const { page = 1, limit = 10, includeStock = true } = pagination;
+    const { page = 1, limit = 10, includeStock = true, search } = pagination;
     const skip = (page - 1) * limit;
+
+    // Build where clause with search capability
+    const whereClause: any = {
+      isDeleted: false,
+      isActive: true,
+    };
+
+    // Add search condition if search term is provided
+    if (search) {
+      whereClause.name = {
+        contains: search,
+        mode: 'insensitive', // Case-insensitive partial match
+      };
+    }
 
     // Fetch products with minimal data
     const [products, total] = await Promise.all([
       this.prisma.product.findMany({
-        where: {
-          isDeleted: false,
-          isActive: true,
-        },
+        where: whereClause,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -297,7 +308,7 @@ export class ProductService {
         },
       }),
       this.prisma.product.count({
-        where: { isDeleted: false },
+        where: whereClause,
       }),
     ]);
 
