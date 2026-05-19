@@ -149,12 +149,15 @@ export class ProductService {
   }
 
   async create(dto: CreateProductDto) {
-    // Check if slug already exists
-    const existingProduct = await this.prisma.product.findUnique({
-      where: { slug: dto.slug },
+    // Check if slug already exists (ignore soft-deleted products — they are not restorable)
+    const existingProduct = await this.prisma.product.findFirst({
+      where: { slug: dto.slug, isDeleted: false },
     });
 
     if (existingProduct) {
+      if (!existingProduct.isActive) {
+        throw new ConflictException('This slug exists for an inactive product');
+      }
       throw new ConflictException('Product with this slug already exists');
     }
 
