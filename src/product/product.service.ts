@@ -45,13 +45,13 @@ export class ProductService {
     }
 
     // Check if any variant has no attributes
-    for (const variant of variants) {
-      if (!variant.attributes || variant.attributes.length === 0) {
-        throw new BadRequestException(
-          'Each variant must have at least one attribute',
-        );
-      }
-    }
+    // for (const variant of variants) {
+    //   if (!variant.attributes || variant.attributes.length === 0) {
+    //     throw new BadRequestException(
+    //       'Each variant must have at least one attribute',
+    //     );
+    //   }
+    // }
 
     // Existing validation logic...
     const attributePairs = variants.flatMap(

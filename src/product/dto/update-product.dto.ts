@@ -7,6 +7,7 @@ import {
   IsArray,
   IsEnum,
   IsDateString,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DiscountType } from '@prisma/client';
@@ -21,6 +22,7 @@ export class UpdateProductVariantDto {
   price?: number;
 
   @IsOptional()
+  @Min(0)
   @IsNumber()
   stock?: number;
 
