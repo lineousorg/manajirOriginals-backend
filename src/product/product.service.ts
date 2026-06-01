@@ -93,6 +93,29 @@ export class ProductService {
   }
 
   /**
+   * Validate that SKU is unique across all variants (excluding the variant being updated)
+   * Throws ConflictException if SKU already exists
+   */
+  private async validateSkuUniqueness(
+    sku: string,
+    excludeVariantId?: number,
+  ): Promise<void> {
+    const existingVariant = await this.prisma.productVariant.findFirst({
+      where: {
+        sku,
+        isDeleted: false,
+        ...(excludeVariantId && { id: { not: excludeVariantId } }),
+      },
+    });
+
+    if (existingVariant) {
+      throw new ConflictException(
+        `SKU '${sku}' is already in use by another product variant`,
+      );
+    }
+  }
+
+  /**
    * Validate variant attributes against category and attribute rules.
    *
    * Validation A: Each attributeId must be assigned to the product's category
@@ -212,10 +235,13 @@ export class ProductService {
       throw new ConflictException('Product with this slug already exists');
     }
 
-    // Validate all variant attributes before creating
+    // Validate SKU uniqueness for all variants before creating
     if (dto.variants && dto.variants.length > 0) {
       for (let i = 0; i < dto.variants.length; i++) {
         const variant = dto.variants[i] as VariantWithAttributesDto;
+        if (variant.sku) {
+          await this.validateSkuUniqueness(variant.sku);
+        }
         if (variant.attributes && variant.attributes.length > 0) {
           await this.validateVariantAttributes(
             dto.categoryId,
@@ -667,6 +693,7 @@ export class ProductService {
               },
             },
             images: {
+              where: { isDeleted: false },
               select: {
                 id: true,
                 url: true,
@@ -678,6 +705,7 @@ export class ProductService {
           },
         },
         images: {
+          where: { isDeleted: false },
           select: {
             id: true,
             url: true,
@@ -857,6 +885,31 @@ export class ProductService {
             })),
           });
         }
+
+        // Soft delete images that are not in the request array
+        const imageIdsInRequest = images
+          .filter(
+            (img): img is typeof img & { id: number } => img.id !== undefined,
+          )
+          .map((img) => img.id);
+
+        const imagesToDelete = await tx.image.findMany({
+          where: {
+            productId: id,
+            id: { notIn: imageIdsInRequest },
+          },
+        });
+
+        if (imagesToDelete.length > 0) {
+          await Promise.all(
+            imagesToDelete.map((img) =>
+              tx.image.update({
+                where: { id: img.id },
+                data: { isDeleted: true, deletedAt: new Date() },
+              }),
+            ),
+          );
+        }
       }
 
       // 3. Handle variants - with attribute support and transaction safety
@@ -876,6 +929,11 @@ export class ProductService {
           await Promise.all(
             variantsToUpdate.map((variant) =>
               (async () => {
+                // Validate SKU uniqueness if SKU is being updated
+                if (variant.sku !== undefined) {
+                  await this.validateSkuUniqueness(variant.sku, variant.id);
+                }
+
                 const updateData: any = {
                   ...(variant.price !== undefined && { price: variant.price }),
                   ...(variant.stock !== undefined && { stock: variant.stock }),
@@ -1017,6 +1075,9 @@ export class ProductService {
 
               // Create new variant with attributes
               return (async () => {
+                // Validate SKU uniqueness for new variant
+                await this.validateSkuUniqueness(variant.sku as string);
+
                 if (variant.attributes && variant.attributes.length > 0) {
                   await this.validateVariantAttributes(
                     targetCategoryId,
@@ -1062,6 +1123,28 @@ export class ProductService {
           });
 
           await Promise.all(upsertPromises);
+        }
+
+        // Soft delete variants that are not in the request array
+        if (variants && variants.length >= 0) {
+          const variantIdsInRequest = new Set(
+            variants.filter((v) => v.id !== undefined).map((v) => v.id),
+          );
+
+          const variantsToDelete = product.variants.filter(
+            (v) => !variantIdsInRequest.has(v.id),
+          );
+
+          if (variantsToDelete.length > 0) {
+            await Promise.all(
+              variantsToDelete.map((v) =>
+                tx.productVariant.update({
+                  where: { id: v.id },
+                  data: { isDeleted: true, deletedAt: new Date() },
+                }),
+              ),
+            );
+          }
         }
       }
 
@@ -1250,18 +1333,13 @@ export class ProductService {
       );
     }
 
-    // 2. Delete the file from filesystem
-    const filePath = image.url; // e.g., /public/uploads/products/filename.jpg
-    await this.fileService.deleteFile(filePath);
-
-    // 3. Delete the image from Cloudinary (if publicId exists)
-    if (image.publicId) {
-      await this.cloudinaryService.delete(image.publicId);
-    }
-
-    // 4. Delete the database record
-    await this.prisma.image.delete({
+    // 2. Soft delete the database record
+    await this.prisma.image.update({
       where: { id: imageId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
     });
 
     return {

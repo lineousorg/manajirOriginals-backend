@@ -10,6 +10,10 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DiscountType } from '@prisma/client';
+import {
+  IsDiscountDateValid,
+  IsFixedDiscountValid,
+} from './discount-date.validator';
 
 export class VariantAttributeDto {
   @IsNumber()
@@ -50,6 +54,10 @@ export class VariantWithAttributesDto {
   @IsOptional()
   @IsDateString()
   discountEnd?: string;
+
+  @IsDiscountDateValid()
+  @IsFixedDiscountValid()
+  dummy?: unknown;
 
   @IsArray()
   @ValidateNested({ each: true })
