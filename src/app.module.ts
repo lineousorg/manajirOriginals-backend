@@ -12,6 +12,7 @@ import { UserModule } from './user/user.module';
 import { AddressModule } from './address/address.module';
 import { AttributeModule } from './attribute/attribute.module';
 import { AttributeValueModule } from './attribute-value/attribute-value.module';
+import { CategoryAttributeModule } from './category-attribute/category-attribute.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { FileModule } from './common/file.module';
@@ -42,6 +43,7 @@ import { MailerModule } from './mailer/mailer.module';
     AddressModule,
     AttributeModule,
     AttributeValueModule,
+    CategoryAttributeModule,
     FileModule,
     StockReservationModule,
     GuestUserModule,

@@ -11,6 +11,10 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DiscountType } from '@prisma/client';
+import {
+  IsDiscountDateValid,
+  IsFixedDiscountValid,
+} from './discount-date.validator';
 
 export class UpdateProductVariantDto {
   @IsOptional()
@@ -46,6 +50,10 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsDateString()
   discountEnd?: string;
+
+  @IsDiscountDateValid()
+  @IsFixedDiscountValid()
+  dummy?: unknown;
 
   /**
    * For creating new variants with attributes

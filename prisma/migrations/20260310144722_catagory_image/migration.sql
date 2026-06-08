@@ -1,1 +1,1 @@
--- placeholder migration
+-- Migration stub: catagory_image (already applied in DB)

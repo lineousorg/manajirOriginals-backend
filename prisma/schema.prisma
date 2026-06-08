@@ -50,7 +50,7 @@ model Category {
   isDeleted              Boolean                  @default(false)
   parent                 Category?                @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children               Category[]               @relation("CategoryHierarchy")
-  CategoryAttribute      CategoryAttribute[]
+  attributes             CategoryAttribute[]
   CategoryAttributeValue CategoryAttributeValue[]
   images                 Image[]
   products               Product[]
@@ -103,8 +103,29 @@ model ProductVariant {
   product        Product            @relation(fields: [productId], references: [id])
   reservations   StockReservation[]
   attributes     VariantAttribute[]
+  id             Int                @id @default(autoincrement())
+  sku            String             @unique
+  price          Decimal            @db.Decimal(10, 2)
+  stock          Int
+  productId      Int
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deletedAt      DateTime?
+  isActive       Boolean            @default(true)
+  isDeleted      Boolean            @default(false)
+  discountEnd    DateTime?
+  discountStart  DateTime?
+  discountType   DiscountType?
+  discountValue  Decimal?           @db.Decimal(10, 2)
+  combinationKey String?
+  images         Image[]
+  orderItems     OrderItem[]
+  product        Product            @relation(fields: [productId], references: [id])
+  reservations   StockReservation[]
+  attributes     VariantAttribute[]
 
   @@index([productId, isDeleted])
+  @@index([combinationKey])
   @@index([combinationKey])
 }
 
@@ -115,22 +136,53 @@ model Attribute {
   isActive               Boolean                  @default(true)
   isDeleted              Boolean                  @default(false)
   values                 AttributeValue[]
-  CategoryAttribute      CategoryAttribute[]
+  categoryAttributes     CategoryAttribute[]
   CategoryAttributeValue CategoryAttributeValue[]
 }
 
 model AttributeValue {
-  id                     Int                      @id @default(autoincrement())
-  value                  String
-  attributeId            Int
-  deletedAt              DateTime?
-  isActive               Boolean                  @default(true)
-  isDeleted              Boolean                  @default(false)
-  attribute              Attribute                @relation(fields: [attributeId], references: [id])
-  CategoryAttributeValue CategoryAttributeValue[]
-  variants               VariantAttribute[]
+  id                      Int                      @id @default(autoincrement())
+  value                   String
+  attributeId             Int
+  deletedAt               DateTime?
+  isActive                Boolean                  @default(true)
+  isDeleted               Boolean                  @default(false)
+  attribute               Attribute                @relation(fields: [attributeId], references: [id])
+  categoryAttributeValues CategoryAttributeValue[]
+  variants                VariantAttribute[]
 
   @@index([attributeId])
+}
+
+model CategoryAttribute {
+  categoryId           Int
+  attributeId          Int
+  sortOrder            Int                  @default(0)
+  isRequired           Boolean              @default(false)
+  isVariantSelectable  Boolean              @default(true)
+  valueRestrictionMode ValueRestrictionMode @default(ALL)
+  attribute            Attribute            @relation(fields: [attributeId], references: [id])
+  category             Category             @relation(fields: [categoryId], references: [id])
+  selectedValues       CategoryAttributeValue[] @relation("CategoryAttributeSelectedValues")
+
+  @@id([categoryId, attributeId])
+  @@index([categoryId])
+  @@index([attributeId])
+}
+
+model CategoryAttributeValue {
+  categoryId         Int
+  attributeId        Int
+  valueId            Int
+  Attribute          Attribute      @relation(fields: [attributeId], references: [id])
+  Category           Category       @relation(fields: [categoryId], references: [id])
+  value              AttributeValue @relation(fields: [valueId], references: [id])
+  categoryAttribute  CategoryAttribute @relation("CategoryAttributeSelectedValues", fields: [categoryId, attributeId], references: [categoryId, attributeId])
+
+  @@id([categoryId, attributeId, valueId])
+  @@index([categoryId, attributeId])
+  @@index([attributeId, valueId])
+  @@index([valueId])
 }
 
 model VariantAttribute {
@@ -140,8 +192,8 @@ model VariantAttribute {
   variant          ProductVariant @relation(fields: [variantId], references: [id])
 
   @@id([variantId, attributeValueId])
-  @@index([attributeValueId])
   @@index([variantId])
+  @@index([attributeValueId])
 }
 
 model Image {
@@ -155,6 +207,8 @@ model Image {
   createdAt  DateTime        @default(now())
   categoryId Int?
   publicId   String?
+  isDeleted  Boolean         @default(false)
+  deletedAt DateTime?
   category   Category?       @relation(fields: [categoryId], references: [id])
   product    Product?        @relation(fields: [productId], references: [id])
   variant    ProductVariant? @relation(fields: [variantId], references: [id])
@@ -197,9 +251,6 @@ model OrderItem {
   variantId          Int
   quantity           Int
   price              Decimal        @db.Decimal(10, 2)
-  /// *
-  /// * Optional reservation ID if this item was reserved before ordering
-  /// * Helps track stock properly during order cancellation
   reservationId      Int?
   discountAmount     Decimal?       @db.Decimal(10, 2)
   discountPercentage Int?
@@ -314,6 +365,12 @@ enum DeliveryType {
 enum DiscountType {
   PERCENTAGE
   FIXED
+}
+
+enum ValueRestrictionMode {
+  ALL
+  SELECTED
+  NONE
 }
 
 enum ValueRestrictionMode {
