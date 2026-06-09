@@ -939,6 +939,55 @@ export class ProductService {
     // Resolve categoryId for validation (use existing if not being changed)
     const targetCategoryId = categoryId ?? product.categoryId;
 
+    // Pre-validate all variants BEFORE entering the transaction
+    // This reduces transaction time and avoids timeout
+    if (variants && variants.length > 0) {
+      const existingVariants = product.variants;
+      const existingVariantMap = new Map(
+        existingVariants.map((v) => [v.sku, v.id]),
+      );
+
+      const variantsToUpdate = variants.filter(
+        (v) => v.id !== undefined,
+      ) as (UpdateProductVariantDto & { id: number })[];
+      const variantsToUpsert = variants.filter((v) => !v.id);
+
+      // Validate SKU uniqueness for all variants being updated
+      for (const variant of variantsToUpdate) {
+        if (variant.sku !== undefined) {
+          await this.validateSkuUniqueness(variant.sku, variant.id);
+        }
+        if (variant.attributes && variant.attributes.length > 0) {
+          await this.validateVariantAttributes(
+            targetCategoryId,
+            variant.attributes.map((a) => ({
+              attributeId: a.attributeId,
+              valueId: a.valueId,
+            })),
+            variant.id!,
+          );
+        }
+      }
+
+      // Validate SKU uniqueness and attributes for all upsert variants
+      for (const variant of variantsToUpsert) {
+        if (variant.sku && variant.price !== undefined) {
+          const existingId = existingVariantMap.get(variant.sku);
+          if (!existingId) {
+            // Only validate for new variants (not SKU-matched existing ones)
+            await this.validateSkuUniqueness(variant.sku as string);
+          }
+          if (variant.attributes && variant.attributes.length > 0) {
+            await this.validateVariantAttributes(
+              targetCategoryId,
+              variant.attributes,
+              existingId ?? 0,
+            );
+          }
+        }
+      }
+    }
+
     return await this.prisma.$transaction(async (tx) => {
       // 1. Update basic product fields
       const updateData: any = { ...rest };
@@ -1030,11 +1079,6 @@ export class ProductService {
           await Promise.all(
             variantsToUpdate.map((variant) =>
               (async () => {
-                // Validate SKU uniqueness if SKU is being updated
-                if (variant.sku !== undefined) {
-                  await this.validateSkuUniqueness(variant.sku, variant.id);
-                }
-
                 const updateData: any = {
                   ...(variant.price !== undefined && { price: variant.price }),
                   ...(variant.stock !== undefined && { stock: variant.stock }),
@@ -1059,16 +1103,6 @@ export class ProductService {
 
                 // Handle attribute updates on existing variants
                 if (variant.attributes) {
-                  // Validate attributes
-                  await this.validateVariantAttributes(
-                    targetCategoryId,
-                    variant.attributes.map((a) => ({
-                      attributeId: a.attributeId,
-                      valueId: a.valueId,
-                    })),
-                    variant.id!,
-                  );
-
                   // Delete existing attribute bindings
                   await tx.variantAttribute.deleteMany({
                     where: { variantId: variant.id! },
@@ -1137,12 +1171,7 @@ export class ProductService {
                 // Handle attributes on SKU-matched existing variant
                 if (variant.attributes) {
                   return (async () => {
-                    await this.validateVariantAttributes(
-                      targetCategoryId,
-                      variant.attributes!,
-                      existingId,
-                    );
-
+                    // Delete existing attribute bindings
                     await tx.variantAttribute.deleteMany({
                       where: { variantId: existingId },
                     });
@@ -1176,17 +1205,6 @@ export class ProductService {
 
               // Create new variant with attributes
               return (async () => {
-                // Validate SKU uniqueness for new variant
-                await this.validateSkuUniqueness(variant.sku as string);
-
-                if (variant.attributes && variant.attributes.length > 0) {
-                  await this.validateVariantAttributes(
-                    targetCategoryId,
-                    variant.attributes,
-                    0,
-                  );
-                }
-
                 const hasAttributes =
                   variant.attributes && variant.attributes.length > 0;
 
@@ -1248,43 +1266,42 @@ export class ProductService {
           }
         }
       }
+    });
 
-      // Finally update the product basic fields
-      const finalProduct = await tx.product.update({
-        where: { id },
-        data: updateData,
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          description: true,
-          productDetailsHtml: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-          categoryId: true,
-          category: { select: { id: true, name: true, slug: true } },
-          variants: {
-            where: { isDeleted: false },
-            select: {
-              id: true,
-              sku: true,
-              price: true,
-              stock: true,
-              isActive: true,
-            },
-          },
-          images: {
-            select: { id: true, url: true, altText: true, position: true },
+    // Fetch final product data AFTER transaction completes
+    const finalProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        productDetailsHtml: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        categoryId: true,
+        category: { select: { id: true, name: true, slug: true } },
+        variants: {
+          where: { isDeleted: false },
+          select: {
+            id: true,
+            sku: true,
+            price: true,
+            stock: true,
+            isActive: true,
           },
         },
-      });
-
-      return {
-        message: 'Product updated successfully',
-        data: finalProduct,
-      };
+        images: {
+          select: { id: true, url: true, altText: true, position: true },
+        },
+      },
     });
+
+    return {
+      message: 'Product updated successfully',
+      data: finalProduct,
+    };
   }
 
   async remove(id: number) {
