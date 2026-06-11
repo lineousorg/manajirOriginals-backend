@@ -911,12 +911,18 @@ export class ProductService {
             },
           },
           images: {
+            where: { isDeleted: false },
             select: { id: true, url: true, altText: true, position: true },
+            orderBy: { position: 'asc' },
           },
         },
       });
 
-      return { message: 'Product updated successfully', data: updatedProduct };
+      return {
+        message: 'Product updated successfully',
+        status: 'success',
+        data: updatedProduct,
+      };
     }
 
     // --- Transactional path for variant/image updates ---
@@ -988,189 +994,193 @@ export class ProductService {
       }
     }
 
-    return await this.prisma.$transaction(async (tx) => {
-      // 1. Update basic product fields
-      const updateData: any = { ...rest };
-      if (categoryId) {
-        updateData.category = { connect: { id: categoryId } };
-      }
-
-      await tx.product.update({
-        where: { id },
-        data: updateData,
-      });
-
-      // 2. Handle images - update existing or add new ones
-      if (images && images.length > 0) {
-        const imagesToUpdate = images.filter((img) => img.id);
-        const imagesToCreate = images.filter((img) => !img.id);
-
-        // Update all images in parallel
-        if (imagesToUpdate.length > 0) {
-          await Promise.all(
-            imagesToUpdate.map((img) =>
-              tx.image.update({
-                where: { id: img.id },
-                data: {
-                  url: img.url,
-                  publicId: img.publicId ?? null,
-                  altText: img.altText ?? null,
-                  position: img.position ?? 0,
-                },
-              }),
-            ),
-          );
+    return await this.prisma.$transaction(
+      async (tx) => {
+        // 1. Update basic product fields
+        const updateData: any = { ...rest };
+        if (categoryId) {
+          updateData.category = { connect: { id: categoryId } };
         }
 
-        // Create new images
-        if (imagesToCreate.length > 0) {
-          await tx.image.createMany({
-            data: imagesToCreate.map((img, index) => ({
-              productId: id,
-              url: img.url,
-              publicId: img.publicId ?? null,
-              altText: img.altText ?? null,
-              position: img.position ?? index,
-              type: 'PRODUCT',
-            })),
-          });
-        }
-
-        // Soft delete images that are not in the request array
-        const imageIdsInRequest = images
-          .filter(
-            (img): img is typeof img & { id: number } => img.id !== undefined,
-          )
-          .map((img) => img.id);
-
-        const imagesToDelete = await tx.image.findMany({
-          where: {
-            productId: id,
-            id: { notIn: imageIdsInRequest },
-          },
+        await tx.product.update({
+          where: { id },
+          data: updateData,
         });
 
-        if (imagesToDelete.length > 0) {
-          await Promise.all(
-            imagesToDelete.map((img) =>
-              tx.image.update({
+        // 2. Handle images - update existing or add new ones
+        if (images && images.length > 0) {
+          const imagesToUpdate = images.filter((img) => img.id);
+          const imagesToCreate = images.filter((img) => !img.id);
+
+          // Update all images in parallel
+          if (imagesToUpdate.length > 0) {
+            await Promise.all(
+              imagesToUpdate.map((img) =>
+                tx.image.update({
+                  where: { id: img.id },
+                  data: {
+                    url: img.url,
+                    publicId: img.publicId ?? null,
+                    altText: img.altText ?? null,
+                    position: img.position ?? 0,
+                  },
+                }),
+              ),
+            );
+          }
+
+          // Create new images and get their IDs to protect them from deletion
+          let newlyCreatedImageIds: number[] = [];
+          if (imagesToCreate.length > 0) {
+            const createdImages = await Promise.all(
+              imagesToCreate.map((img, index) =>
+                tx.image.create({
+                  data: {
+                    productId: id,
+                    url: img.url,
+                    publicId: img.publicId ?? null,
+                    altText: img.altText ?? null,
+                    position: img.position ?? index,
+                    type: 'PRODUCT',
+                  },
+                }),
+              ),
+            );
+            newlyCreatedImageIds = createdImages.map((img) => img.id);
+          }
+
+          // Soft delete images that are not in the request array
+          const imageIdsInRequest = [
+            ...images
+              .filter(
+                (img): img is typeof img & { id: number } =>
+                  img.id !== undefined,
+              )
+              .map((img) => img.id),
+            ...newlyCreatedImageIds,
+          ];
+
+          const imagesToDelete = await tx.image.findMany({
+            where: {
+              productId: id,
+              id: { notIn: imageIdsInRequest },
+            },
+          });
+
+          if (imagesToDelete.length > 0) {
+            for (const img of imagesToDelete) {
+              await tx.image.update({
                 where: { id: img.id },
                 data: { isDeleted: true, deletedAt: new Date() },
-              }),
-            ),
-          );
+              });
+            }
+          }
         }
-      }
 
-      // 3. Handle variants - with attribute support and transaction safety
-      if (variants && variants.length > 0) {
-        const existingVariants = product.variants;
-        const existingVariantMap = new Map(
-          existingVariants.map((v) => [v.sku, v.id]),
-        );
+        // 3. Handle variants - with attribute support and transaction safety
+        if (variants && variants.length > 0) {
+          const existingVariants = product.variants;
+          const existingVariantMap = new Map(
+            existingVariants.map((v) => [v.sku, v.id]),
+          );
 
-        const variantsToUpdate = variants.filter(
-          (v) => v.id !== undefined,
-        ) as (UpdateProductVariantDto & { id: number })[];
-        const variantsToUpsert = variants.filter((v) => !v.id);
+          const variantsToUpdate = variants.filter(
+            (v) => v.id !== undefined,
+          ) as (UpdateProductVariantDto & { id: number })[];
+          const variantsToUpsert = variants.filter((v) => !v.id);
 
-        // Update existing variants by ID
-        if (variantsToUpdate.length > 0) {
-          await Promise.all(
-            variantsToUpdate.map((variant) =>
-              (async () => {
-                const updateData: any = {
-                  ...(variant.price !== undefined && { price: variant.price }),
-                  ...(variant.stock !== undefined && { stock: variant.stock }),
-                  ...(variant.sku !== undefined && { sku: variant.sku }),
-                  ...(variant.discountType !== undefined && {
-                    discountType: variant.discountType,
-                  }),
-                  ...(variant.discountValue !== undefined && {
-                    discountValue: variant.discountValue,
-                  }),
-                  ...(variant.discountStart !== undefined && {
-                    discountStart: variant.discountStart
-                      ? new Date(variant.discountStart)
-                      : null,
-                  }),
-                  ...(variant.discountEnd !== undefined && {
-                    discountEnd: variant.discountEnd
-                      ? new Date(variant.discountEnd)
-                      : null,
-                  }),
-                };
+          // Update existing variants by ID
+          if (variantsToUpdate.length > 0) {
+            for (const variant of variantsToUpdate) {
+              const updateData: any = {
+                ...(variant.price !== undefined && { price: variant.price }),
+                ...(variant.stock !== undefined && { stock: variant.stock }),
+                ...(variant.sku !== undefined && { sku: variant.sku }),
+                ...(variant.discountType !== undefined && {
+                  discountType: variant.discountType,
+                }),
+                ...(variant.discountValue !== undefined && {
+                  discountValue: variant.discountValue,
+                }),
+                ...(variant.discountStart !== undefined && {
+                  discountStart: variant.discountStart
+                    ? new Date(variant.discountStart)
+                    : null,
+                }),
+                ...(variant.discountEnd !== undefined && {
+                  discountEnd: variant.discountEnd
+                    ? new Date(variant.discountEnd)
+                    : null,
+                }),
+              };
 
-                // Handle attribute updates on existing variants
-                if (variant.attributes) {
-                  // Delete existing attribute bindings
-                  await tx.variantAttribute.deleteMany({
-                    where: { variantId: variant.id! },
+              // Handle attribute updates on existing variants
+              if (variant.attributes) {
+                // Delete existing attribute bindings
+                await tx.variantAttribute.deleteMany({
+                  where: { variantId: variant.id! },
+                });
+
+                // Create new attribute bindings
+                if (variant.attributes.length > 0) {
+                  await tx.variantAttribute.createMany({
+                    data: variant.attributes.map((a) => ({
+                      variantId: variant.id!,
+                      attributeValueId: a.valueId,
+                    })),
                   });
-
-                  // Create new attribute bindings
-                  if (variant.attributes.length > 0) {
-                    await tx.variantAttribute.createMany({
-                      data: variant.attributes.map((a) => ({
-                        variantId: variant.id!,
-                        attributeValueId: a.valueId,
-                      })),
-                    });
-                  }
-
-                  // Update combination key
-                  updateData.combinationKey =
-                    variant.attributes.length > 0
-                      ? this.generateCombinationKey(
-                          variant.attributes.map((a) => ({
-                            attributeId: a.attributeId,
-                            valueId: a.valueId,
-                          })),
-                        )
-                      : null;
                 }
 
-                return tx.productVariant.update({
-                  where: { id: variant.id },
-                  data: updateData,
-                });
-              })(),
-            ),
-          );
-        }
+                // Update combination key
+                updateData.combinationKey =
+                  variant.attributes.length > 0
+                    ? this.generateCombinationKey(
+                        variant.attributes.map((a) => ({
+                          attributeId: a.attributeId,
+                          valueId: a.valueId,
+                        })),
+                      )
+                    : null;
+              }
 
-        // Upsert variants by checking if SKU exists
-        if (variantsToUpsert.length > 0) {
-          const upsertPromises = variantsToUpsert.map((variant) => {
-            if (variant.sku && variant.price !== undefined) {
-              const existingId = existingVariantMap.get(variant.sku);
+              await tx.productVariant.update({
+                where: { id: variant.id },
+                data: updateData,
+              });
+            }
+          }
 
-              if (existingId) {
-                // Update existing variant found by SKU
-                const updateData: any = {
-                  price: variant.price!,
-                  stock: variant.stock ?? 0,
-                  ...(variant.discountType !== undefined && {
-                    discountType: variant.discountType,
-                  }),
-                  ...(variant.discountValue !== undefined && {
-                    discountValue: variant.discountValue,
-                  }),
-                  ...(variant.discountStart !== undefined && {
-                    discountStart: variant.discountStart
-                      ? new Date(variant.discountStart)
-                      : null,
-                  }),
-                  ...(variant.discountEnd !== undefined && {
-                    discountEnd: variant.discountEnd
-                      ? new Date(variant.discountEnd)
-                      : null,
-                  }),
-                };
+          // Upsert variants by checking if SKU exists
+          if (variantsToUpsert.length > 0) {
+            for (const variant of variantsToUpsert) {
+              if (variant.sku && variant.price !== undefined) {
+                const existingId = existingVariantMap.get(variant.sku);
 
-                // Handle attributes on SKU-matched existing variant
-                if (variant.attributes) {
-                  return (async () => {
+                if (existingId) {
+                  // Update existing variant found by SKU
+                  const updateData: any = {
+                    price: variant.price!,
+                    stock: variant.stock ?? 0,
+                    ...(variant.discountType !== undefined && {
+                      discountType: variant.discountType,
+                    }),
+                    ...(variant.discountValue !== undefined && {
+                      discountValue: variant.discountValue,
+                    }),
+                    ...(variant.discountStart !== undefined && {
+                      discountStart: variant.discountStart
+                        ? new Date(variant.discountStart)
+                        : null,
+                    }),
+                    ...(variant.discountEnd !== undefined && {
+                      discountEnd: variant.discountEnd
+                        ? new Date(variant.discountEnd)
+                        : null,
+                    }),
+                  };
+
+                  // Handle attributes on SKU-matched existing variant
+                  if (variant.attributes) {
                     // Delete existing attribute bindings
                     await tx.variantAttribute.deleteMany({
                       where: { variantId: existingId },
@@ -1189,84 +1199,73 @@ export class ProductService {
                       variant.attributes!.length > 0
                         ? this.generateCombinationKey(variant.attributes!)
                         : null;
+                  }
 
-                    return tx.productVariant.update({
-                      where: { id: existingId },
-                      data: updateData,
-                    });
-                  })();
+                  await tx.productVariant.update({
+                    where: { id: existingId },
+                    data: updateData,
+                  });
+                } else {
+                  // Create new variant with attributes
+                  const hasAttributes =
+                    variant.attributes && variant.attributes.length > 0;
+
+                  await tx.productVariant.create({
+                    data: {
+                      productId: id,
+                      sku: variant.sku as string,
+                      price: variant.price as number,
+                      stock: variant.stock ?? 0,
+                      isActive: true,
+                      isDeleted: false,
+                      discountType: variant.discountType ?? null,
+                      discountValue: variant.discountValue ?? null,
+                      discountStart: variant.discountStart
+                        ? new Date(variant.discountStart)
+                        : null,
+                      discountEnd: variant.discountEnd
+                        ? new Date(variant.discountEnd)
+                        : null,
+                      combinationKey: hasAttributes
+                        ? this.generateCombinationKey(variant.attributes!)
+                        : null,
+                      ...(hasAttributes && {
+                        attributes: {
+                          create: variant.attributes!.map((a) => ({
+                            attributeValueId: a.valueId,
+                          })),
+                        },
+                      }),
+                    },
+                  });
                 }
-
-                return tx.productVariant.update({
-                  where: { id: existingId },
-                  data: updateData,
-                });
               }
-
-              // Create new variant with attributes
-              return (async () => {
-                const hasAttributes =
-                  variant.attributes && variant.attributes.length > 0;
-
-                return tx.productVariant.create({
-                  data: {
-                    productId: id,
-                    sku: variant.sku as string,
-                    price: variant.price as number,
-                    stock: variant.stock ?? 0,
-                    isActive: true,
-                    isDeleted: false,
-                    discountType: variant.discountType ?? null,
-                    discountValue: variant.discountValue ?? null,
-                    discountStart: variant.discountStart
-                      ? new Date(variant.discountStart)
-                      : null,
-                    discountEnd: variant.discountEnd
-                      ? new Date(variant.discountEnd)
-                      : null,
-                    combinationKey: hasAttributes
-                      ? this.generateCombinationKey(variant.attributes!)
-                      : null,
-                    ...(hasAttributes && {
-                      attributes: {
-                        create: variant.attributes!.map((a) => ({
-                          attributeValueId: a.valueId,
-                        })),
-                      },
-                    }),
-                  },
-                });
-              })();
             }
-            return Promise.resolve();
-          });
+          }
 
-          await Promise.all(upsertPromises);
-        }
+          // Soft delete variants that are not in the request array
+          if (variants && variants.length >= 0) {
+            const variantIdsInRequest = new Set(
+              variants.filter((v) => v.id !== undefined).map((v) => v.id),
+            );
 
-        // Soft delete variants that are not in the request array
-        if (variants && variants.length >= 0) {
-          const variantIdsInRequest = new Set(
-            variants.filter((v) => v.id !== undefined).map((v) => v.id),
-          );
+            const variantsToDelete = product.variants.filter(
+              (v) => !variantIdsInRequest.has(v.id),
+            );
 
-          const variantsToDelete = product.variants.filter(
-            (v) => !variantIdsInRequest.has(v.id),
-          );
-
-          if (variantsToDelete.length > 0) {
-            await Promise.all(
-              variantsToDelete.map((v) =>
-                tx.productVariant.update({
+            if (variantsToDelete.length > 0) {
+              for (const v of variantsToDelete) {
+                await tx.productVariant.update({
                   where: { id: v.id },
                   data: { isDeleted: true, deletedAt: new Date() },
-                }),
-              ),
-            );
+                });
+              }
+            }
           }
         }
-      }
-    });
+      },
+      { timeout: 15000 },
+    );
 
     // Fetch final product data AFTER transaction completes
     const finalProduct = await this.prisma.product.findUnique({
@@ -1293,13 +1292,16 @@ export class ProductService {
           },
         },
         images: {
+          where: { isDeleted: false },
           select: { id: true, url: true, altText: true, position: true },
+          orderBy: { position: 'asc' },
         },
       },
     });
 
     return {
       message: 'Product updated successfully',
+      status: 'success',
       data: finalProduct,
     };
   }
