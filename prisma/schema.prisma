@@ -283,6 +283,7 @@ enum ImageType {
   PRODUCT
   VARIANT
   CATEGORY
+  SIZE_CHART
 }
 
 enum ReservationStatus {

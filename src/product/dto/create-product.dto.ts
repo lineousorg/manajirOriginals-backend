@@ -57,4 +57,9 @@ export class CreateProductDto {
   @Type(() => CreateProductImageDto)
   @IsOptional()
   images?: CreateProductImageDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateProductImageDto)
+  sizeChart?: CreateProductImageDto;
 }

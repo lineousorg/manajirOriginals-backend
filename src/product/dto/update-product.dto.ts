@@ -8,6 +8,7 @@ import {
   IsEnum,
   IsDateString,
   Min,
+  Allow,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DiscountType } from '@prisma/client';
@@ -79,8 +80,9 @@ export class UpdateProductImageDto {
   @IsNumber()
   id?: number;
 
+  @IsOptional()
   @IsString()
-  url!: string;
+  url?: string;
 
   @IsOptional()
   @IsString()
@@ -133,4 +135,10 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateProductImageDto)
   images?: UpdateProductImageDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UpdateProductImageDto)
+  @Allow()
+  sizeChart?: UpdateProductImageDto | null;
 }

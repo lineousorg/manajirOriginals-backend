@@ -336,15 +336,40 @@ export class ProductService {
         name: dto.name,
         images: dto.images
           ? {
-              create: dto.images.map((img, index) => ({
-                url: img.url,
-                publicId: img.publicId ?? null,
-                altText: img.altText ?? null,
-                position: img.position ?? index,
-                type: 'PRODUCT',
-              })),
+              create: [
+                ...dto.images.map((img, index) => ({
+                  url: img.url,
+                  publicId: img.publicId ?? null,
+                  altText: img.altText ?? null,
+                  position: img.position ?? index,
+                  type: 'PRODUCT',
+                })),
+                ...(dto.sizeChart
+                  ? [
+                      {
+                        url: dto.sizeChart.url,
+                        publicId: dto.sizeChart.publicId ?? null,
+                        altText: dto.sizeChart.altText ?? null,
+                        type: 'SIZE_CHART',
+                        position: 0,
+                      },
+                    ]
+                  : []),
+              ],
             }
-          : undefined,
+          : dto.sizeChart
+            ? {
+                create: [
+                  {
+                    url: dto.sizeChart.url,
+                    publicId: dto.sizeChart.publicId ?? null,
+                    altText: dto.sizeChart.altText ?? null,
+                    type: 'SIZE_CHART',
+                    position: 0,
+                  },
+                ],
+              }
+            : undefined,
         description: dto.description,
         productDetailsHtml: dto.productDetailsHtml ?? null,
         categoryId: dto.categoryId,
@@ -791,6 +816,14 @@ export class ProductService {
             },
           },
         },
+        sizeChartImage: {
+          where: { type: 'SIZE_CHART', isDeleted: false },
+          select: {
+            id: true,
+            url: true,
+            publicId: true,
+          },
+        },
         images: {
           where: { isDeleted: false },
           select: {
@@ -852,12 +885,13 @@ export class ProductService {
         ...product,
         variants: sortedVariants,
         applicableAttributes,
+        sizeChartImage: product.sizeChartImage?.[0] ?? null,
       },
     };
   }
 
   async update(id: number, dto: UpdateProductDto) {
-    const { categoryId, variants, images, ...rest } = dto;
+    const { categoryId, variants, images, sizeChart, ...rest } = dto;
 
     const existingProduct = await this.prisma.product.findUnique({
       where: { id },
@@ -873,9 +907,11 @@ export class ProductService {
       await this.validateVariantAttributePayload(variants);
     }
 
-    // Determine if we need a transaction (only for images/variants changes)
+    // Determine if we need a transaction (only for images/variants/sizeChart changes)
     const needsTransaction =
-      (variants && variants.length > 0) || (images && images.length > 0);
+      (variants && variants.length > 0) ||
+      (images && images.length > 0) ||
+      sizeChart !== undefined;
 
     // If no transaction needed, do a simple update
     if (!needsTransaction) {
@@ -1077,7 +1113,49 @@ export class ProductService {
           }
         }
 
-        // 3. Handle variants - with attribute support and transaction safety
+        // 3. Handle size chart image
+        if (sizeChart !== undefined) {
+          const existingSizeChart = await tx.image.findFirst({
+            where: { productId: id, type: 'SIZE_CHART', isDeleted: false },
+            select: { id: true },
+          });
+
+          if (sizeChart === null) {
+            // Remove existing size chart
+            if (existingSizeChart) {
+              await tx.image.update({
+                where: { id: existingSizeChart.id },
+                data: { isDeleted: true, deletedAt: new Date() },
+              });
+            }
+          } else if (sizeChart.url) {
+            if (existingSizeChart) {
+              // Update existing size chart
+              await tx.image.update({
+                where: { id: existingSizeChart.id },
+                data: {
+                  url: sizeChart.url,
+                  publicId: sizeChart.publicId ?? null,
+                  altText: sizeChart.altText ?? null,
+                },
+              });
+            } else {
+              // Create new size chart
+              await tx.image.create({
+                data: {
+                  productId: id,
+                  url: sizeChart.url,
+                  publicId: sizeChart.publicId ?? null,
+                  altText: sizeChart.altText ?? null,
+                  type: 'SIZE_CHART',
+                  position: 0,
+                },
+              });
+            }
+          }
+        }
+
+        // 4. Handle variants - with attribute support and transaction safety
         if (variants && variants.length > 0) {
           const existingVariants = product.variants;
           const existingVariantMap = new Map(
@@ -1296,13 +1374,20 @@ export class ProductService {
           select: { id: true, url: true, altText: true, position: true },
           orderBy: { position: 'asc' },
         },
+        sizeChartImage: {
+          where: { type: 'SIZE_CHART', isDeleted: false },
+          select: { id: true, url: true, publicId: true },
+        },
       },
     });
 
     return {
       message: 'Product updated successfully',
       status: 'success',
-      data: finalProduct,
+      data: {
+        ...finalProduct,
+        sizeChartImage: finalProduct?.sizeChartImage?.[0] ?? null,
+      },
     };
   }
 
