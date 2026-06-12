@@ -10,6 +10,7 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { ImageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockReservationService } from '../stock-reservation/stock-reservation.service';
 import { PricingService } from '../common/services/pricing.service';
@@ -342,7 +343,7 @@ export class ProductService {
                   publicId: img.publicId ?? null,
                   altText: img.altText ?? null,
                   position: img.position ?? index,
-                  type: 'PRODUCT',
+                  type: ImageType.PRODUCT,
                 })),
                 ...(dto.sizeChart
                   ? [
@@ -350,7 +351,7 @@ export class ProductService {
                         url: dto.sizeChart.url,
                         publicId: dto.sizeChart.publicId ?? null,
                         altText: dto.sizeChart.altText ?? null,
-                        type: 'SIZE_CHART',
+                        type: ImageType.SIZE_CHART,
                         position: 0,
                       },
                     ]
@@ -364,7 +365,7 @@ export class ProductService {
                     url: dto.sizeChart.url,
                     publicId: dto.sizeChart.publicId ?? null,
                     altText: dto.sizeChart.altText ?? null,
-                    type: 'SIZE_CHART',
+                    type: ImageType.SIZE_CHART,
                     position: 0,
                   },
                 ],
@@ -816,14 +817,6 @@ export class ProductService {
             },
           },
         },
-        sizeChartImage: {
-          where: { type: 'SIZE_CHART', isDeleted: false },
-          select: {
-            id: true,
-            url: true,
-            publicId: true,
-          },
-        },
         images: {
           where: { isDeleted: false },
           select: {
@@ -831,6 +824,8 @@ export class ProductService {
             url: true,
             altText: true,
             position: true,
+            type: true,
+            publicId: true,
           },
           orderBy: { position: 'asc' },
         },
@@ -883,9 +878,12 @@ export class ProductService {
       status: 'success',
       data: {
         ...product,
+        // Only PRODUCT type images in the images array
+        images: product.images?.filter((img) => img.type === 'PRODUCT') || [],
         variants: sortedVariants,
         applicableAttributes,
-        sizeChartImage: product.sizeChartImage?.[0] ?? null,
+        sizeChartImage:
+          product.images?.find((img) => img.type === 'SIZE_CHART') ?? null,
       },
     };
   }
@@ -1055,7 +1053,7 @@ export class ProductService {
                 tx.image.update({
                   where: { id: img.id },
                   data: {
-                    url: img.url,
+                    url: img.url!,
                     publicId: img.publicId ?? null,
                     altText: img.altText ?? null,
                     position: img.position ?? 0,
@@ -1073,11 +1071,11 @@ export class ProductService {
                 tx.image.create({
                   data: {
                     productId: id,
-                    url: img.url,
+                    url: img.url!,
                     publicId: img.publicId ?? null,
                     altText: img.altText ?? null,
                     position: img.position ?? index,
-                    type: 'PRODUCT',
+                    type: ImageType.PRODUCT,
                   },
                 }),
               ),
@@ -1147,7 +1145,7 @@ export class ProductService {
                   url: sizeChart.url,
                   publicId: sizeChart.publicId ?? null,
                   altText: sizeChart.altText ?? null,
-                  type: 'SIZE_CHART',
+                  type: ImageType.SIZE_CHART,
                   position: 0,
                 },
               });
@@ -1371,12 +1369,15 @@ export class ProductService {
         },
         images: {
           where: { isDeleted: false },
-          select: { id: true, url: true, altText: true, position: true },
+          select: {
+            id: true,
+            url: true,
+            altText: true,
+            position: true,
+            type: true,
+            publicId: true,
+          },
           orderBy: { position: 'asc' },
-        },
-        sizeChartImage: {
-          where: { type: 'SIZE_CHART', isDeleted: false },
-          select: { id: true, url: true, publicId: true },
         },
       },
     });
@@ -1386,7 +1387,9 @@ export class ProductService {
       status: 'success',
       data: {
         ...finalProduct,
-        sizeChartImage: finalProduct?.sizeChartImage?.[0] ?? null,
+        sizeChartImage:
+          finalProduct?.images?.find((img) => img.type === 'SIZE_CHART') ??
+          null,
       },
     };
   }
